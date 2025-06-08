@@ -114,7 +114,7 @@ def get_explainer(model, args):
         model=model,
         algorithm=algorithm,
         explanation_type='phenomenon' if args.explanation_type == 'phenomenon' else 'model',
-        node_mask_type='attributes',
+        node_mask_type='object',
         edge_mask_type='object',
         model_config=dict(
             mode='multiclass_classification',
@@ -146,8 +146,10 @@ def parse_args():
                         help='GNN层数')
     parser.add_argument('--sample_id', type=str, default='',
                         help='要解释的特定样本ID，格式: [think_/nothink_]<id>。如果提供，将直接加载此样本')
-    parser.add_argument('--sample_idx', type=int, default=0,
+    parser.add_argument('--sample_idx', type=int, default=20,
                         help='从数据集加载的样本索引，仅当sample_id为空时使用')
+    parser.add_argument('--load_nothink', action='store_true',
+                        help='在使用sample_idx时，指定加载nothink样本而非think样本')
     parser.add_argument('--fast_mode', action='store_true',
                         help='启用快速模式，使用预先存储的样本列表避免加载整个数据集')
     parser.add_argument('--gpu_id', type=int, default=0,
@@ -158,7 +160,7 @@ def parse_args():
     parser.add_argument('--explanation_type', type=str, default='model',
                         choices=['model', 'phenomenon'],
                         help='解释类型: model-解释模型决策, phenomenon-解释样本标签关联的拓扑特征')
-    parser.add_argument('--output_dir', type=str, default='explanation_results',
+    parser.add_argument('--output_dir', type=str, default='explanation_results_3',
                         help='解释结果保存目录')
     return parser.parse_args()
 
@@ -188,9 +190,32 @@ def main():
             sample_list = torch.load(sample_list_path)
             print(f"从缓存加载了 {len(sample_list)} 个样本索引")
             
+            # 统计样本类型分布
+            think_count = sum(1 for item in sample_list if item['label'] == 1)
+            nothink_count = sum(1 for item in sample_list if item['label'] == 0)
+            print(f"样本分布: think样本数量: {think_count}, nothink样本数量: {nothink_count}")
+            print(f"样本0-10的标签: {[sample_list[i]['label'] for i in range(min(10, len(sample_list)))]}")
+            print(f"样本40-60的标签: {[sample_list[i]['label'] for i in range(40, min(60, len(sample_list)))]}")
+            
             # 获取请求的样本
             sample_idx = min(args.sample_idx, len(sample_list) - 1)
             sample_info = sample_list[sample_idx]
+            print(f"选择的样本索引: {sample_idx}, ID: {sample_info['id']}, 标签: {sample_info['label']}")
+            
+            # 如果用户指定要加载nothink样本，但当前样本是think样本，或者相反
+            if (args.load_nothink and sample_info['label'] == 1) or (not args.load_nothink and sample_info['label'] == 0):
+                # 查找对应类别的样本
+                target_label = 0 if args.load_nothink else 1
+                matching_samples = [i for i, item in enumerate(sample_list) if item['label'] == target_label]
+                
+                if matching_samples:
+                    # 选择索引最接近的样本
+                    closest_idx = min(matching_samples, key=lambda x: abs(x - sample_idx))
+                    sample_info = sample_list[closest_idx]
+                    sample_idx = closest_idx  # 更新sample_idx为新选择的索引
+                    print(f"根据--load_nothink参数调整: 选择的新样本索引: {closest_idx}, ID: {sample_info['id']}, 标签: {sample_info['label']}")
+                else:
+                    print(f"警告: 无法找到目标标签为{target_label}的样本，仍使用原样本")
             
             # 加载单个样本
             data = load_single_sample(
@@ -234,6 +259,25 @@ def main():
             
             # 获取请求的样本
             sample_idx = min(args.sample_idx, len(sample_list) - 1)
+            sample_info = sample_list[sample_idx]
+            print(f"选择的样本索引: {sample_idx}, ID: {sample_info['id']}, 标签: {sample_info['label']}")
+            
+            # 如果用户指定要加载nothink样本，但当前样本是think样本，或者相反
+            if (args.load_nothink and sample_info['label'] == 1) or (not args.load_nothink and sample_info['label'] == 0):
+                # 查找对应类别的样本
+                target_label = 0 if args.load_nothink else 1
+                matching_samples = [i for i, item in enumerate(sample_list) if item['label'] == target_label]
+                
+                if matching_samples:
+                    # 选择索引最接近的样本
+                    closest_idx = min(matching_samples, key=lambda x: abs(x - sample_idx))
+                    sample_info = sample_list[closest_idx]
+                    sample_idx = closest_idx  # 更新sample_idx为新选择的索引
+                    print(f"根据--load_nothink参数调整: 选择的新样本索引: {closest_idx}, ID: {sample_info['id']}, 标签: {sample_info['label']}")
+                else:
+                    print(f"警告: 无法找到目标标签为{target_label}的样本，仍使用原样本")
+            
+            # 加载单个样本
             data = test_data_loader.dataset[sample_idx].to(device)
     else:
         # 常规模式：加载完整数据集
@@ -256,6 +300,27 @@ def main():
         print(f"获取样本数据...")
         sample_idx = min(args.sample_idx, len(test_data_loader.dataset) - 1)
         data = test_data_loader.dataset[sample_idx].to(device)
+        
+        # 检查是否需要根据--load_nothink参数调整
+        is_think = data.y.item() == 1
+        if (args.load_nothink and is_think) or (not args.load_nothink and not is_think):
+            # 需要切换样本类型
+            target_label = 0 if args.load_nothink else 1
+            print(f"当前样本标签为 {data.y.item()}, 根据--load_nothink参数需要查找标签为 {target_label} 的样本")
+            
+            # 查找对应标签的样本
+            matching_samples = []
+            for i, sample_data in enumerate(test_data_loader.dataset):
+                if sample_data.y.item() == target_label:
+                    matching_samples.append(i)
+            
+            if matching_samples:
+                # 选择索引最接近的样本
+                closest_idx = min(matching_samples, key=lambda x: abs(x - sample_idx))
+                print(f"找到匹配的样本，索引: {closest_idx}")
+                data = test_data_loader.dataset[closest_idx].to(device)
+            else:
+                print(f"警告: 无法找到标签为 {target_label} 的样本，仍使用原样本")
     
     # 初始化模型
     print(f"初始化模型...")
@@ -357,50 +422,6 @@ def main():
     # 保存边掩码和节点掩码
     torch.save(explanation.edge_mask, os.path.join(args.output_dir, f"edge_mask_{args.explanation_method}.pt"))
     torch.save(explanation.node_mask, os.path.join(args.output_dir, f"node_mask_{args.explanation_method}.pt"))
-    
-    # 节点特征重要性可视化 - 自定义实现，避免可能的警告和错误
-    try:
-        # 计算每个特征维度的重要性
-        feature_importance = explanation.node_mask.mean(dim=0).cpu().numpy()
-        
-        # 创建特征重要性可视化
-        plt.figure(figsize=(10, 6))
-        feature_indices = np.arange(len(feature_importance))
-        
-        # 按重要性排序
-        sorted_indices = np.argsort(feature_importance)[::-1]
-        top_k = min(20, len(sorted_indices))  # 取前20个或所有
-        
-        # 选择前top_k个特征
-        top_indices = sorted_indices[:top_k]
-        top_importance = feature_importance[top_indices]
-        
-        # 创建条形图
-        bars = plt.bar(np.arange(top_k), top_importance, color='skyblue', edgecolor='navy')
-        
-        # 设置图表属性
-        plt.xlabel('Feature Index')
-        plt.ylabel('Importance Score')
-        plt.title('Top-K Feature Importance')
-        plt.xticks(np.arange(top_k), [str(idx) for idx in top_indices])
-        plt.grid(axis='y', linestyle='--', alpha=0.7)
-        
-        # 添加数值标签
-        for i, bar in enumerate(bars):
-            height = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                    f'{top_importance[i]:.3f}', ha='center', va='bottom',
-                    fontsize=8, rotation=45)
-        
-        plt.tight_layout()
-        feature_imp_path = os.path.join(args.output_dir, f"feature_importance_{args.explanation_method}.png")
-        plt.savefig(feature_imp_path, dpi=300)
-        plt.close()
-        print(f"特征重要性可视化已保存到 {feature_imp_path}")
-    except Exception as e:
-        print(f"特征重要性可视化失败: {e}")
-        import traceback
-        traceback.print_exc()
     
     # 子图可视化
     try:
