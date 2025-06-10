@@ -8,6 +8,8 @@ import seaborn as sns
 import argparse
 import networkx as nx
 import matplotlib
+import pandas as pd
+from scipy.stats import pearsonr
 
 # 设置matplotlib参数
 matplotlib.rcParams['font.sans-serif'] = ['Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'sans-serif']
@@ -196,6 +198,357 @@ def plot_important_edges(matrix, title, output_path, top_n=50, min_weight=0.01, 
     print(f"Saved network visualization to: {output_path_net}")
     print(f"Saved distribution histogram to: {output_path}_distribution.png")
 
+def print_top_edges(matrix, title, top_n=200, use_absolute=False):
+    """打印网络中权重最大的边
+    
+    参数:
+        matrix: 网络矩阵
+        title: 标题描述
+        top_n: 要打印的边数量
+        use_absolute: 是否使用绝对值进行排序
+    """
+    # 将矩阵转换为边列表格式
+    n = matrix.shape[0]
+    all_edges = []
+    
+    # 收集所有边（只考虑下三角，避免重复）
+    for i in range(n):
+        for j in range(i+1, n):
+            weight = matrix[i, j]
+            if weight != 0:  # 只收集非零边
+                all_edges.append((i, j, abs(weight) if use_absolute else weight, weight))
+    
+    # 检查是否有边
+    if not all_edges:
+        print(f"警告: 未找到非零边")
+        return
+    
+    # 按权重排序边（如果use_absolute=True则按绝对值排序，否则按原始值排序）
+    sort_key = 2 if use_absolute else 3
+    all_edges.sort(key=lambda x: x[sort_key], reverse=True)
+    
+    # 打印前top_n个边
+    print(f"\n{title} - 前{min(top_n, len(all_edges))}个权重最大的边:")
+    print(f"{'节点1':<8} {'节点2':<8} {'权重':<12}")
+    print("-" * 30)
+    
+    for i, (node1, node2, _, weight) in enumerate(all_edges[:top_n]):
+        print(f"{node1:<8} {node2:<8} {weight:<12.6f}")
+
+def analyze_node_degrees(matrices, titles, output_path, threshold=0.1):
+    """分析和可视化不同网络中节点度的对比
+    
+    参数:
+        matrices: 网络矩阵列表
+        titles: 对应的标题列表
+        output_path: 输出文件路径
+        threshold: 考虑边的权重阈值
+    """
+    if not matrices or len(matrices) != len(titles):
+        print("错误: 矩阵和标题数量不匹配")
+        return
+    
+    plt.figure(figsize=(15, 10))
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']  # 不同网络使用不同颜色
+    
+    # 计算每个网络的节点加权度
+    for idx, (matrix, title) in enumerate(zip(matrices, titles)):
+        if matrix is None:
+            continue
+            
+        n = matrix.shape[0]
+        
+        # 计算每个节点的加权度（权重绝对值之和）
+        weighted_degrees = {}
+        for i in range(n):
+            # 计算与该节点相连的所有边的权重绝对值之和
+            # 排除对角线元素（自环）
+            row_sum = np.sum(np.abs(matrix[i, :][np.arange(n) != i]))
+            col_sum = np.sum(np.abs(matrix[:, i][np.arange(n) != i]))
+            # 由于是对称矩阵，行和列的和应该相等，但为了避免浮点误差，取平均值
+            weighted_degrees[i] = (row_sum + col_sum) / 2
+        
+        degrees_list = list(weighted_degrees.values())
+        
+        # 绘制加权度分布直方图
+        color = colors[idx % len(colors)]
+        sns.histplot(degrees_list, bins=30, kde=True, color=color, alpha=0.7, 
+                     label=f"{title} (avg={np.mean(degrees_list):.2f})")
+        
+        # 打印加权度统计信息
+        print(f"\n{title} 节点加权度统计:")
+        print(f"  节点数: {n}")
+        print(f"  平均加权度: {np.mean(degrees_list):.4f}")
+        print(f"  最大加权度: {np.max(degrees_list):.4f} (节点 {max(weighted_degrees, key=weighted_degrees.get)})")
+        print(f"  最小加权度: {np.min(degrees_list):.4f} (节点 {min(weighted_degrees, key=weighted_degrees.get)})")
+        print(f"  加权度为0的节点数: {sum(1 for d in degrees_list if d == 0)}")
+        print(f"  标准差: {np.std(degrees_list):.4f}")
+        
+        # 找出加权度最大的前10个节点
+        top_nodes = sorted(weighted_degrees.items(), key=lambda x: x[1], reverse=True)[:10]
+        print(f"  加权度最大的10个节点:")
+        for node, degree in top_nodes:
+            print(f"    节点 {node}: 加权度 = {degree:.4f}")
+        
+        # 保存节点加权度数据到CSV
+        df = pd.DataFrame({"Node": list(weighted_degrees.keys()), "Weighted Degree": list(weighted_degrees.values())})
+        df.sort_values(by="Weighted Degree", ascending=False, inplace=True)
+        df.to_csv(f"{output_path}_{title.replace(' ', '_')}_weighted_degrees.csv", index=False)
+    
+    plt.title("Node Weighted Degree Distribution Comparison", fontsize=16)
+    plt.xlabel("Node Weighted Degree", fontsize=14)
+    plt.ylabel("Frequency", fontsize=14)
+    plt.legend(fontsize=12)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    
+    # 保存图像
+    plt.savefig(f"{output_path}_weighted_degree_distribution.png", dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # 创建加权度对比散点图
+    if len(matrices) >= 2 and matrices[0] is not None and matrices[1] is not None:
+        plt.figure(figsize=(10, 8))
+        
+        # 确保两个矩阵大小相同
+        min_size = min(matrices[0].shape[0], matrices[1].shape[0])
+        matrix1 = matrices[0][:min_size, :min_size]
+        matrix2 = matrices[1][:min_size, :min_size]
+        
+        # 计算每个节点在两个网络中的加权度
+        weighted_degrees1 = {}
+        weighted_degrees2 = {}
+        
+        for i in range(min_size):
+            # 第一个网络的加权度
+            row_sum1 = np.sum(np.abs(matrix1[i, :][np.arange(min_size) != i]))
+            col_sum1 = np.sum(np.abs(matrix1[:, i][np.arange(min_size) != i]))
+            weighted_degrees1[i] = (row_sum1 + col_sum1) / 2
+            
+            # 第二个网络的加权度
+            row_sum2 = np.sum(np.abs(matrix2[i, :][np.arange(min_size) != i]))
+            col_sum2 = np.sum(np.abs(matrix2[:, i][np.arange(min_size) != i]))
+            weighted_degrees2[i] = (row_sum2 + col_sum2) / 2
+        
+        # 创建加权度对比数据
+        nodes = range(min_size)
+        degree_pairs = [(weighted_degrees1.get(n, 0), weighted_degrees2.get(n, 0)) for n in nodes]
+        
+        # 计算相关系数
+        x_vals = [p[0] for p in degree_pairs]
+        y_vals = [p[1] for p in degree_pairs]
+        correlation, p_value = pearsonr(x_vals, y_vals)
+        
+        # 绘制散点图
+        plt.scatter(x_vals, y_vals, alpha=0.5)
+        
+        # 添加回归线
+        m, b = np.polyfit(x_vals, y_vals, 1)
+        plt.plot(x_vals, [m*x + b for x in x_vals], color='red', linestyle='--')
+        
+        plt.title(f"Node Weighted Degree Comparison: {titles[0]} vs {titles[1]}\nCorrelation: {correlation:.4f}", fontsize=14)
+        plt.xlabel(f"{titles[0]} Node Weighted Degree", fontsize=12)
+        plt.ylabel(f"{titles[1]} Node Weighted Degree", fontsize=12)
+        plt.grid(True, alpha=0.3)
+        
+        # 添加45度参考线
+        max_degree = max(max(x_vals), max(y_vals))
+        plt.plot([0, max_degree], [0, max_degree], color='green', alpha=0.5, linestyle=':')
+        
+        plt.tight_layout()
+        plt.savefig(f"{output_path}_weighted_degree_comparison.png", dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        # 创建加权度差异分布直方图
+        plt.figure(figsize=(10, 6))
+        degree_diffs = [d2 - d1 for d1, d2 in zip(x_vals, y_vals)]
+        sns.histplot(degree_diffs, bins=30, kde=True)
+        plt.axvline(x=0, color='red', linestyle='--')
+        plt.title(f"Node Weighted Degree Difference: {titles[1]} - {titles[0]}\nAverage Difference: {np.mean(degree_diffs):.4f}", fontsize=14)
+        plt.xlabel("Node Weighted Degree Difference", fontsize=12)
+        plt.ylabel("Frequency", fontsize=12)
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(f"{output_path}_weighted_degree_difference.png", dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        # 打印加权度差异的统计信息
+        print(f"\n节点加权度差异统计 ({titles[1]} - {titles[0]}):")
+        print(f"  平均差异: {np.mean(degree_diffs):.4f}")
+        print(f"  标准差: {np.std(degree_diffs):.4f}")
+        print(f"  最大正差异: {np.max(degree_diffs):.4f}")
+        print(f"  最大负差异: {np.min(degree_diffs):.4f}")
+        
+        # 找出加权度差异最大的节点
+        diff_with_nodes = [(i, degree_diffs[i]) for i in range(len(degree_diffs))]
+        top_diff_pos = sorted(diff_with_nodes, key=lambda x: x[1], reverse=True)[:10]
+        top_diff_neg = sorted(diff_with_nodes, key=lambda x: x[1])[:10]
+        
+        print(f"  加权度差异最大的10个节点 ({titles[1]} > {titles[0]}):")
+        for node, diff in top_diff_pos:
+            print(f"    节点 {node}: 差异 = {diff:.4f} ({weighted_degrees2.get(node, 0):.4f} - {weighted_degrees1.get(node, 0):.4f})")
+        
+        print(f"  加权度差异最小的10个节点 ({titles[0]} > {titles[1]}):")
+        for node, diff in top_diff_neg:
+            print(f"    节点 {node}: 差异 = {diff:.4f} ({weighted_degrees2.get(node, 0):.4f} - {weighted_degrees1.get(node, 0):.4f})")
+    
+    print(f"节点加权度分析完成，结果保存在: {output_path}")
+
+def compare_edge_weights(matrix1, matrix2, title1, title2, output_path, top_n=1000):
+    """对比两个网络中边的权重，选取权重绝对值排前1000的边，取并集后制作散点图
+    
+    参数:
+        matrix1: 第一个网络矩阵
+        matrix2: 第二个网络矩阵
+        title1: 第一个网络标题
+        title2: 第二个网络标题
+        output_path: 输出文件路径
+        top_n: 每个网络中选取的边数量
+    """
+    if matrix1 is None or matrix2 is None:
+        print("Error: Both matrices must be provided")
+        return
+    
+    # 确保两个矩阵大小相同
+    min_size = min(matrix1.shape[0], matrix2.shape[0])
+    matrix1 = matrix1[:min_size, :min_size]
+    matrix2 = matrix2[:min_size, :min_size]
+    
+    # 收集两个网络的所有边
+    edges1 = {}
+    edges2 = {}
+    
+    # 收集第一个网络的边（只考虑下三角，避免重复）
+    for i in range(min_size):
+        for j in range(i+1, min_size):
+            weight = matrix1[i, j]
+            if weight != 0:  # 只收集非零边
+                edges1[(i, j)] = weight
+    
+    # 收集第二个网络的边
+    for i in range(min_size):
+        for j in range(i+1, min_size):
+            weight = matrix2[i, j]
+            if weight != 0:  # 只收集非零边
+                edges2[(i, j)] = weight
+    
+    # 按权重绝对值排序
+    sorted_edges1 = sorted(edges1.items(), key=lambda x: abs(x[1]), reverse=True)
+    sorted_edges2 = sorted(edges2.items(), key=lambda x: abs(x[1]), reverse=True)
+    
+    # 取前top_n个边
+    top_edges1 = sorted_edges1[:top_n] if len(sorted_edges1) > top_n else sorted_edges1
+    top_edges2 = sorted_edges2[:top_n] if len(sorted_edges2) > top_n else sorted_edges2
+    
+    # 提取边的键（节点对）
+    top_edges1_keys = set(edge[0] for edge in top_edges1)
+    top_edges2_keys = set(edge[0] for edge in top_edges2)
+    
+    # 取并集
+    union_edges = top_edges1_keys.union(top_edges2_keys)
+    print(f"Selected {len(union_edges)} unique edges (union of top {top_n} edges from each network)")
+    
+    # 准备散点图数据
+    x_vals = []
+    y_vals = []
+    
+    for edge in union_edges:
+        x_val = edges1.get(edge, 0)  # 如果边不存在，权重为0
+        y_val = edges2.get(edge, 0)
+        x_vals.append(x_val)
+        y_vals.append(y_val)
+    
+    # 计算相关系数
+    correlation, p_value = pearsonr(x_vals, y_vals)
+    
+    # 绘制散点图
+    plt.figure(figsize=(12, 10))
+    
+    # 定义颜色映射函数 - 基于两个网络中权重的差异
+    colors = []
+    for x, y in zip(x_vals, y_vals):
+        # 计算差异
+        diff = abs(x) - abs(y)
+        # 红色表示第一个网络权重更大，蓝色表示第二个网络权重更大
+        if diff > 0:
+            colors.append('red')
+        elif diff < 0:
+            colors.append('blue')
+        else:
+            colors.append('gray')
+    
+    # 绘制散点图
+    plt.scatter(x_vals, y_vals, alpha=0.7, c=colors)
+    
+    # 添加回归线
+    m, b = np.polyfit(x_vals, y_vals, 1)
+    sorted_x = sorted(x_vals)
+    plt.plot(sorted_x, [m*x + b for x in sorted_x], color='green', linestyle='--')
+    
+    # 添加45度参考线
+    max_val = max(max(abs(min(x_vals)), abs(max(x_vals))), max(abs(min(y_vals)), abs(max(y_vals))))
+    plt.plot([-max_val, max_val], [-max_val, max_val], color='black', alpha=0.5, linestyle=':')
+    
+    # 添加坐标轴
+    plt.axhline(y=0, color='gray', linestyle='-', alpha=0.3)
+    plt.axvline(x=0, color='gray', linestyle='-', alpha=0.3)
+    
+    # 添加标题和标签
+    plt.title(f"Edge Weight Comparison: {title1} vs {title2}\nCorrelation: {correlation:.4f}", fontsize=16)
+    plt.xlabel(f"{title1} Edge Weight", fontsize=14)
+    plt.ylabel(f"{title2} Edge Weight", fontsize=14)
+    plt.grid(True, alpha=0.3)
+    
+    # 添加图例
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], marker='o', color='w', markerfacecolor='red', markersize=10, label=f'Higher in {title1}'),
+        Line2D([0], [0], marker='o', color='w', markerfacecolor='blue', markersize=10, label=f'Higher in {title2}'),
+        Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', markersize=10, label='Equal')
+    ]
+    plt.legend(handles=legend_elements, loc='best')
+    
+    plt.tight_layout()
+    plt.savefig(f"{output_path}_edge_weight_comparison.png", dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # 保存边权重数据到CSV
+    edge_data = []
+    for edge, x, y in zip(union_edges, x_vals, y_vals):
+        i, j = edge
+        edge_data.append({
+            "Node1": i,
+            "Node2": j,
+            f"{title1}_Weight": x,
+            f"{title2}_Weight": y,
+            "Abs_Difference": abs(x) - abs(y)
+        })
+    
+    df = pd.DataFrame(edge_data)
+    df.sort_values(by="Abs_Difference", ascending=False, inplace=True)
+    df.to_csv(f"{output_path}_edge_weight_comparison.csv", index=False)
+    
+    print(f"Edge weight comparison completed. Results saved to: {output_path}_edge_weight_comparison.png")
+    
+    # 打印一些统计信息
+    print(f"\n边权重对比统计:")
+    print(f"  总边数: {len(union_edges)}")
+    print(f"  相关系数: {correlation:.4f} (p-value: {p_value:.4e})")
+    print(f"  {title1}中权重绝对值更大的边: {sum(1 for x, y in zip(x_vals, y_vals) if abs(x) > abs(y))}")
+    print(f"  {title2}中权重绝对值更大的边: {sum(1 for x, y in zip(x_vals, y_vals) if abs(x) < abs(y))}")
+    print(f"  权重绝对值相等的边: {sum(1 for x, y in zip(x_vals, y_vals) if abs(x) == abs(y))}")
+    
+    # 打印权重差异最大的前10条边
+    print(f"\n权重差异最大的10条边 ({title1} > {title2}):")
+    top_diff = sorted(zip(union_edges, x_vals, y_vals), key=lambda t: abs(t[1])-abs(t[2]), reverse=True)[:10]
+    for (i, j), x, y in top_diff:
+        print(f"  节点 {i}-{j}: {x:.4f} vs {y:.4f}, 差异: {abs(x)-abs(y):.4f}")
+    
+    print(f"\n权重差异最大的10条边 ({title2} > {title1}):")
+    bottom_diff = sorted(zip(union_edges, x_vals, y_vals), key=lambda t: abs(t[1])-abs(t[2]))[:10]
+    for (i, j), x, y in bottom_diff:
+        print(f"  节点 {i}-{j}: {x:.4f} vs {y:.4f}, 差异: {abs(x)-abs(y):.4f}")
+
 def main():
     parser = argparse.ArgumentParser(description='Visualize Network Matrices as Network Graphs')
     parser.add_argument('--think_network', type=str, default='network_analysis_results/think_average_network.npy',
@@ -222,6 +575,16 @@ def main():
                         help='Maximum number of node labels to show (to avoid overcrowding)')
     parser.add_argument('--font_size', type=int, default=20,
                         help='Font size for node labels (default: 12)')
+    parser.add_argument('--print_top', type=int, default=50,
+                        help='Print top N edges by weight (set to 0 to disable)')
+    parser.add_argument('--degree_threshold', type=float, default=0,
+                        help='Threshold for considering an edge in degree calculation')
+    parser.add_argument('--analyze_degrees', action='store_true',
+                        help='Perform node degree analysis')
+    parser.add_argument('--compare_edge_weights', action='store_true',
+                        help='Compare edge weights between Think and NoThink networks')
+    parser.add_argument('--top_edges_compare', type=int, default=524288,
+                        help='Number of top edges to include in edge weight comparison')
     
     args = parser.parse_args()
     
@@ -242,6 +605,11 @@ def main():
         
     if difference_network is not None:
         print_matrix_stats(difference_network, "Difference network")
+    
+    # 打印前N个权重最大的边
+    if args.print_top > 0:
+        if difference_network is not None:
+            print_top_edges(difference_network, "差异网络(Think - NoThink)", args.print_top, use_absolute=True)
     
     # 准备选择重要边的参数
     percent_arg = args.percent if args.use_percent else None
@@ -278,21 +646,27 @@ def main():
             font_size=args.font_size
         )
     
-    if difference_network is not None:
-        # 绘制重要边
-        plot_important_edges(
-            difference_network,
-            "Difference Network (Think - NoThink)",
-            os.path.join(args.output_dir, "difference"),
-            top_n=args.top_edges,
-            min_weight=args.min_weight,
-            percent=percent_arg,
-            show_node_ids=show_node_ids,
-            max_node_labels=args.max_node_labels,
-            font_size=args.font_size
+    # 执行节点度分析
+    if args.analyze_degrees:
+        print("\n执行节点度分析...")
+        matrices = [think_network, nothink_network, difference_network]
+        titles = ["Think Model", "NoThink Model", "Difference Network"]
+        analyze_node_degrees(matrices, titles, os.path.join(args.output_dir, "node_degrees"), 
+                            threshold=args.degree_threshold)
+    
+    # 执行边权重对比分析
+    if args.compare_edge_weights and think_network is not None and nothink_network is not None:
+        print("\n执行边权重对比分析...")
+        compare_edge_weights(
+            think_network, 
+            nothink_network, 
+            "Think Model", 
+            "NoThink Model", 
+            os.path.join(args.output_dir, "edge_weights"),
+            top_n=args.top_edges_compare
         )
     
-    print(f"\nVisualization completed. Network graphs and distribution histograms saved in {args.output_dir} directory")
+    print(f"\nVisualization completed. Results saved in {args.output_dir} directory")
 
 if __name__ == "__main__":
     main() 
