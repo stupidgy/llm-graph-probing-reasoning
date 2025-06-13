@@ -10,8 +10,9 @@ import random
 import matplotlib
 
 # 设置matplotlib字体，解决中文显示问题
-matplotlib.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans', 'Bitstream Vera Sans', 'sans-serif']
-matplotlib.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+plt.rcParams['font.sans-serif'] = ['SimHei']  # 使用黑体
+plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+plt.rcParams['font.family'] = 'sans-serif'  # 使用无衬线字体
 
 # 设置模型路径
 MODEL1_PATH = "data/graph_probing/data4/huguangyi/models/Qwen/Qwen3-0.6B"
@@ -165,9 +166,9 @@ def plot_weight_distribution_sample(networks, model_name):
     
     plt.figure(figsize=(10, 6))
     sns.histplot(weights, kde=True)
-    plt.title(f"{model_name} 边权重分布（样本）")
-    plt.xlabel("边权重")
-    plt.ylabel("频率")
+    plt.title(f"{model_name} Edge Weight Distribution (Sample)")
+    plt.xlabel("Edge Weight")
+    plt.ylabel("Frequency")
     plt.savefig(os.path.join(OUTPUT_DIR, f"{model_name}_weight_distribution_sample.png"), dpi=300)
     plt.close()
     
@@ -180,6 +181,58 @@ def plot_weight_distribution_sample(networks, model_name):
         "负权重比例": len(negative_weights) / len(weights) if len(weights) > 0 else 0,
         "正权重平均值": np.mean(positive_weights) if len(positive_weights) > 0 else 0,
         "负权重平均值": np.mean(negative_weights) if len(negative_weights) > 0 else 0,
+    }
+    
+    return stats
+
+def plot_degree_distribution(networks, model_name, threshold=0.2):
+    """绘制节点度分布"""
+    all_degrees = []
+    
+    # 收集所有网络的节点度
+    for network in tqdm(networks, desc=f"计算{model_name}的节点度分布"):
+        G = nx.Graph()
+        n = network.shape[0]
+        G.add_nodes_from(range(n))
+        
+        # 添加边
+        for i in range(n):
+            for j in range(i+1, n):
+                if abs(network[i, j]) > threshold:
+                    G.add_edge(i, j, weight=network[i, j])
+        
+        # 收集节点度
+        degrees = [d for _, d in G.degree()]
+        all_degrees.extend(degrees)
+    
+    # 绘制度分布直方图
+    plt.figure(figsize=(10, 6))
+    sns.histplot(all_degrees, kde=True, bins=50)
+    plt.title(f"{model_name} Node Degree Distribution")
+    plt.xlabel("Node Degree")
+    plt.ylabel("Frequency")
+    plt.savefig(os.path.join(OUTPUT_DIR, f"{model_name}_degree_distribution.png"), dpi=300)
+    plt.close()
+    
+    # 绘制度分布的累积分布函数
+    plt.figure(figsize=(10, 6))
+    degrees_sorted = np.sort(all_degrees)
+    p = np.arange(1, len(degrees_sorted) + 1) / len(degrees_sorted)
+    plt.plot(degrees_sorted, p, 'b-', linewidth=2)
+    plt.title(f"{model_name} Node Degree Cumulative Distribution")
+    plt.xlabel("Node Degree")
+    plt.ylabel("Cumulative Probability")
+    plt.grid(True)
+    plt.savefig(os.path.join(OUTPUT_DIR, f"{model_name}_degree_cdf.png"), dpi=300)
+    plt.close()
+    
+    # 计算度分布的统计量
+    stats = {
+        "平均度": np.mean(all_degrees),
+        "度标准差": np.std(all_degrees),
+        "最小度": np.min(all_degrees),
+        "最大度": np.max(all_degrees),
+        "中位度": np.median(all_degrees),
     }
     
     return stats
@@ -239,10 +292,10 @@ def analyze_network_similarity_sample(networks1, networks2, network_ids1, networ
     plt.figure(figsize=(10, 6))
     sns.histplot(pearson_correlations, kde=True)
     plt.axvline(np.mean(pearson_correlations), color='r', linestyle='--', 
-                label=f'平均值: {np.mean(pearson_correlations):.4f}')
-    plt.title("两个模型网络的Pearson相关系数分布")
-    plt.xlabel("Pearson相关系数")
-    plt.ylabel("频率")
+                label=f'Mean: {np.mean(pearson_correlations):.4f}')
+    plt.title("Pearson Correlation Distribution between Two Models")
+    plt.xlabel("Pearson Correlation Coefficient")
+    plt.ylabel("Frequency")
     plt.legend()
     plt.savefig(os.path.join(OUTPUT_DIR, "pearson_correlation_distribution.png"), dpi=300)
     plt.close()
@@ -322,6 +375,11 @@ def main():
     weight_stats1 = plot_weight_distribution_sample(networks1, os.path.basename(MODEL1_PATH))
     weight_stats2 = plot_weight_distribution_sample(networks2, os.path.basename(MODEL2_PATH))
     
+    # 绘制节点度分布
+    print("\n分析节点度分布...")
+    degree_stats1 = plot_degree_distribution(networks1, os.path.basename(MODEL1_PATH))
+    degree_stats2 = plot_degree_distribution(networks2, os.path.basename(MODEL2_PATH))
+    
     # 分析网络相似性
     print("\n分析网络相似性...")
     similarity_results = analyze_network_similarity_sample(networks1, networks2, network_ids1, network_ids2)
@@ -349,6 +407,15 @@ def main():
     for stat_name, value in weight_stats2.items():
         print(f"  {stat_name}: {value:.4f}")
     
+    print("\n=============== 节点度分布分析 ===============")
+    print(f"\n模型1 ({os.path.basename(MODEL1_PATH)}):")
+    for stat_name, value in degree_stats1.items():
+        print(f"  {stat_name}: {value:.4f}")
+    
+    print(f"\n模型2 ({os.path.basename(MODEL2_PATH)}):")
+    for stat_name, value in degree_stats2.items():
+        print(f"  {stat_name}: {value:.4f}")
+    
     if similarity_results:
         print("\n=============== 网络相似性分析 ===============")
         for category, stats in similarity_results.items():
@@ -366,6 +433,24 @@ def main():
                 "模型1": results1[category][stat_name],
                 "模型2": results2[category][stat_name]
             })
+    
+    # 添加边权重分布统计
+    for stat_name in weight_stats1.keys():
+        data.append({
+            "特性": "边权重分布",
+            "统计量": stat_name,
+            "模型1": weight_stats1[stat_name],
+            "模型2": weight_stats2[stat_name]
+        })
+    
+    # 添加节点度分布统计
+    for stat_name in degree_stats1.keys():
+        data.append({
+            "特性": "节点度分布",
+            "统计量": stat_name,
+            "模型1": degree_stats1[stat_name],
+            "模型2": degree_stats2[stat_name]
+        })
     
     results_df = pd.DataFrame(data)
     
