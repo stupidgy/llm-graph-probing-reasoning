@@ -269,86 +269,6 @@ def compute_average_network(networks):
     
     return average_network
 
-def plot_network_heatmap(network, title, output_path):
-    """将网络矩阵绘制为热度图"""
-    # 打印网络矩阵的统计信息以进行诊断
-    print(f"\n热度图 '{title}' 的数据统计:")
-    print(f"  最大值: {np.max(network):.6f}")
-    print(f"  最小值: {np.min(network):.6f}")
-    print(f"  平均值: {np.mean(network):.6f}")
-    print(f"  标准差: {np.std(network):.6f}")
-    print(f"  中位数: {np.median(network):.6f}")
-    print(f"  非零值占比: {np.count_nonzero(network)/network.size*100:.2f}%")
-    
-    # 如果数据范围太小，调整对比度
-    vmax = max(abs(np.max(network)), abs(np.min(network)))
-    if vmax < 0.01:  # 如果最大值太小
-        print(f"  警告: 数据范围过小 ({vmax:.6f})，将进行对比度增强")
-        # 对网络进行归一化处理以增强对比度
-        network_enhanced = network.copy()
-        # 使用百分比阈值进行截断，保留极端值
-        p_low, p_high = np.percentile(network_enhanced, [5, 95])
-        print(f"  5%分位数: {p_low:.6f}, 95%分位数: {p_high:.6f}")
-        vmax = max(abs(p_low), abs(p_high))
-    else:
-        network_enhanced = network.copy()
-    
-    # 创建下三角矩阵热度图
-    plt.figure(figsize=(12, 10))
-    mask = np.zeros_like(network, dtype=bool)
-    mask[np.triu_indices_from(mask, k=1)] = True  # 只显示下三角矩阵，避免重复
-    
-    # 使用英文标题避免字体问题
-    eng_title = title
-    if "Think模型" in title:
-        eng_title = f"Think Model Average Correlation Network (Layer {LAYER})"
-    elif "NoThink模型" in title:
-        eng_title = f"NoThink Model Average Correlation Network (Layer {LAYER})"
-    elif "差异网络" in title:
-        eng_title = f"Difference Network between Think and NoThink Models (Layer {LAYER})"
-    
-    # 创建热度图，使用vmax和vmin设置颜色范围
-    sns.heatmap(network_enhanced, mask=mask, cmap="coolwarm", center=0,
-                square=True, linewidths=0.5, cbar_kws={"shrink": 0.5},
-                vmin=-vmax, vmax=vmax)  # 使用对称的颜色范围
-    
-    plt.title(eng_title, fontsize=16)
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=300)
-    plt.close()
-    
-    # 生成带颜色条的完整热度图
-    plt.figure(figsize=(14, 12))
-    sns.heatmap(network_enhanced, cmap="coolwarm", center=0,
-                square=True, linewidths=0.5, vmin=-vmax, vmax=vmax)
-    
-    plt.title(eng_title + " (Full)", fontsize=16) 
-    plt.tight_layout()
-    plt.savefig(output_path.replace('.png', '_full.png'), dpi=300)
-    plt.close()
-    
-    # 额外生成一个使用更极端颜色映射的版本
-    plt.figure(figsize=(14, 12))
-    # 使用不同的色彩映射和更强的对比度
-    sns.heatmap(network_enhanced, cmap="RdBu_r", center=0,
-                square=True, linewidths=0.5, 
-                robust=True,  # 使用鲁棒统计量而不是极值
-                annot=False)  # 不显示数值标注以避免过于拥挤
-    
-    plt.title(eng_title + " (Enhanced Contrast)", fontsize=16)
-    plt.tight_layout()
-    plt.savefig(output_path.replace('.png', '_enhanced.png'), dpi=300)
-    plt.close()
-    
-    # 保存数据分布直方图以帮助分析
-    plt.figure(figsize=(10, 6))
-    sns.histplot(network.flatten(), bins=50, kde=True)
-    plt.title(f"Value Distribution - {eng_title}", fontsize=14)
-    plt.xlabel("Correlation Value")
-    plt.ylabel("Frequency")
-    plt.savefig(output_path.replace('.png', '_distribution.png'), dpi=300)
-    plt.close()
-
 def main():
     # 设置随机种子以确保可重复性
     random.seed(42)
@@ -371,36 +291,21 @@ def main():
     for key, value in stats2.items():
         print(f"{key}: {value}")
     
-    # 计算平均网络并绘制热度图
-    print("\n计算平均网络并绘制热度图...")
+    # 计算平均网络
+    print("\n计算平均网络...")
     avg_network1 = compute_average_network(networks1)
     avg_network2 = compute_average_network(networks2)
     
     if avg_network1 is not None:
         print(f"模型1平均网络形状: {avg_network1.shape}")
-        plot_network_heatmap(
-            avg_network1, 
-            f"Think模型平均相关网络 (层 {LAYER})", 
-            os.path.join(OUTPUT_DIR, "think_average_network_heatmap.png")
-        )
     
     if avg_network2 is not None:
         print(f"模型2平均网络形状: {avg_network2.shape}")
-        plot_network_heatmap(
-            avg_network2, 
-            f"NoThink模型平均相关网络 (层 {LAYER})", 
-            os.path.join(OUTPUT_DIR, "nothink_average_network_heatmap.png")
-        )
     
-    # 计算差异网络并绘制热度图
+    # 计算差异网络
     if avg_network1 is not None and avg_network2 is not None:
         diff_network = avg_network1 - avg_network2
         print(f"差异网络形状: {diff_network.shape}")
-        plot_network_heatmap(
-            diff_network, 
-            f"Think与NoThink模型的差异网络 (层 {LAYER})", 
-            os.path.join(OUTPUT_DIR, "difference_network_heatmap.png")
-        )
         
         # 保存平均网络和差异网络
         np.save(os.path.join(OUTPUT_DIR, "think_average_network.npy"), avg_network1)
