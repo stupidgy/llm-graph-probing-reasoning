@@ -15,7 +15,7 @@ plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 plt.rcParams['font.family'] = 'sans-serif'  # 使用无衬线字体
 
 # 设置模型路径
-MODEL1_PATH = "data/graph_probing/data4/huguangyi/models/Qwen/Qwen3-0.6B"
+MODEL1_PATH = "data/graph_probing/data4/huguangyi/models/Qwen/Qwen3-0.6B_no_thinking"
 MODEL2_PATH = "data/graph_probing/data4/huguangyi/models/Qwen/Qwen3-0.6B_nothink"
 LAYER = 14
 OUTPUT_DIR = "network_analysis_results"

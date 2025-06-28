@@ -20,12 +20,12 @@ def load_single_sample(think_path, nothink_path, network_id, llm_layer, network_
     if network_id.startswith('think_'):
         # think样本
         path = think_path
-        network_idx = network_id[6:]  # 去除'think_'前缀
+        network_idx = network_id[6:]  # 去除'think_'前缀（think_的长度是6）
         label = 1
     elif network_id.startswith('nothink_'):
         # nothink样本
         path = nothink_path
-        network_idx = network_id[9:]  # 去除'nothink_'前缀
+        network_idx = network_id[8:]  # 去除'nothink_'前缀（nothink_的长度是8）
         label = 0
     else:
         # 如果没有前缀，默认为think样本
@@ -129,7 +129,7 @@ def parse_args():
     parser.add_argument('--model_path', type=str, default='saves/binary_classification/layer_14/best_model_density-1.0_dim-32_hop-1.pth',
                         help='训练好的模型路径')
     parser.add_argument('--think_path', type=str, 
-                        default='data/graph_probing/data4/huguangyi/models/Qwen/Qwen3-0.6B',
+                        default='data/graph_probing/data4/huguangyi/models/Qwen/Qwen3-0.6B_no_thinking',
                         help='think数据集路径')
     parser.add_argument('--nothink_path', type=str,
                         default='data/graph_probing/data4/huguangyi/models/Qwen/Qwen3-0.6B_nothink',
@@ -152,7 +152,7 @@ def parse_args():
                         help='在使用sample_idx时，指定加载nothink样本而非think样本')
     parser.add_argument('--fast_mode', action='store_true',
                         help='启用快速模式，使用预先存储的样本列表避免加载整个数据集')
-    parser.add_argument('--gpu_id', type=int, default=0,
+    parser.add_argument('--gpu_id', type=int, default=6,
                         help='GPU ID')
     parser.add_argument('--explanation_method', type=str, default='gnnexplainer',
                         choices=['gnnexplainer', 'captum_ig', 'captum_saliency'],
@@ -160,7 +160,7 @@ def parse_args():
     parser.add_argument('--explanation_type', type=str, default='model',
                         choices=['model', 'phenomenon'],
                         help='解释类型: model-解释模型决策, phenomenon-解释样本标签关联的拓扑特征')
-    parser.add_argument('--output_dir', type=str, default='explanation_results_3',
+    parser.add_argument('--output_dir', type=str, default='explanation_results_nothink',
                         help='解释结果保存目录')
     return parser.parse_args()
 
