@@ -313,11 +313,6 @@ class NeuralInterventionController:
                     hidden_states = output[0]
                     seq_len = hidden_states.shape[1]
                     
-                    print(f"    钩子被调用 #{hook_call_count}: seq_len={seq_len}, prompt_length={self.prompt_length}")
-                    
-                    # 直接收集所有激活值，不进行任何过滤
-                    print(f"    正在收集第 {hook_call_count} 个token的激活值")
-                    
                     for dim_idx, dim in enumerate(target_dimensions):
                         # 对于seq_len=1的情况，取第0个位置；对于seq_len>1的情况，取最后一个位置
                         if seq_len == 1:
@@ -327,10 +322,8 @@ class NeuralInterventionController:
                         
                         activation_value = token_activation.flatten().detach().cpu().numpy()[0]
                         activation_values_by_dim[dim].append(activation_value)
-                        print(f"      维度 {dim}: 激活值 = {activation_value:.6f}")
                     
                     total_collected = sum(len(values) for values in activation_values_by_dim.values())
-                    print(f"    已收集激活值总数: {total_collected}")
                 
                 # 注册统计钩子
                 layer = self.model.model.layers[target_layer]
@@ -567,7 +560,7 @@ def run_intervention_experiment(model_path: str,
     # 默认高斯参数
     if gaussian_params is None:
         gaussian_params = [
-            {"mean": 500, "std": 0}
+            {"mean": 0, "std": 0}
         ]
     
     # 初始化控制器
@@ -804,7 +797,7 @@ def parse_args():
                         help='模型路径')
     parser.add_argument('--target_layer', type=int, default=14,
                         help='目标层索引')
-    parser.add_argument('--target_dimensions', type=str, default='16,18',
+    parser.add_argument('--target_dimensions', type=str, default='13,18',
                         help='目标维度，用逗号分隔')
     parser.add_argument('--intervention_types', type=str, default='gaussian_replace',
                         help='干预类型，用逗号分隔')
@@ -816,7 +809,7 @@ def parse_args():
                         help='设备')
     
     # GPU设备参数
-    parser.add_argument('--gpu_id', type=int, default=5,
+    parser.add_argument('--gpu_id', type=int, default=1,
                         help='指定使用的GPU设备ID（默认：4）')
     
     # 通用生成配置参数
@@ -866,9 +859,9 @@ def main():
     else:
         # 默认测试提示
         prompts = [
-            "The value of log base a certain number ( log 5625 ) is 2. What is that base?",
-            "The value of log base a certain number ( log 5625 ) is 2. What is that base?",
-            "The value of log base a certain number ( log 5625 ) is 2. What is that base?"
+            "Pat is to select six cookies from a tray containing only chocolate chip, oatmeal, and peanut butter cookies. There are at least six of each of these three kinds of cookies on the tray. How many different assortments of six cookies can be selected? (Note that cookies of the same type are not distinguishable.)",
+            "Pat is to select six cookies from a tray containing only chocolate chip, oatmeal, and peanut butter cookies. There are at least six of each of these three kinds of cookies on the tray. How many different assortments of six cookies can be selected? (Note that cookies of the same type are not distinguishable.)",
+            "Pat is to select six cookies from a tray containing only chocolate chip, oatmeal, and peanut butter cookies. There are at least six of each of these three kinds of cookies on the tray. How many different assortments of six cookies can be selected? (Note that cookies of the same type are not distinguishable.)"
         ]
     
     print(f"将对模型 {args.model_path} 进行神经干预双模式实验")

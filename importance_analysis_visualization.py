@@ -1467,7 +1467,7 @@ def main():
                        help='输出目录路径')
     parser.add_argument('--layer', type=int, default=14,
                        help='指定分析的layer（默认分析所有layer）')
-    parser.add_argument('--top_k', type=int, default=10,
+    parser.add_argument('--top_k', type=int, default=20,
                        help='查找前k个最重要的元素（默认10）')
     parser.add_argument('--num_nodes', type=int, default=1024,
                        help='全连接网络的节点数（默认1024）')
