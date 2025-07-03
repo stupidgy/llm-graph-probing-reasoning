@@ -797,7 +797,7 @@ def parse_args():
                         help='模型路径')
     parser.add_argument('--target_layer', type=int, default=14,
                         help='目标层索引')
-    parser.add_argument('--target_dimensions', type=str, default='13,18',
+    parser.add_argument('--target_dimensions', type=str, default='13,18,8,840,28,686,569,139,242,1',
                         help='目标维度，用逗号分隔')
     parser.add_argument('--intervention_types', type=str, default='gaussian_replace',
                         help='干预类型，用逗号分隔')
@@ -817,25 +817,25 @@ def parse_args():
                         help='最大生成token数（两种模式共用）')
     
     # NoThink模式生成配置参数
-    parser.add_argument('--nothink_temperature', type=float, default=0.7,
+    parser.add_argument('--nothink_temperature', type=float, default=0.0,
                         help='NoThink模式的温度参数，控制随机性')
     parser.add_argument('--nothink_top_k', type=int, default=20,
                         help='NoThink模式的top-k sampling参数')
     parser.add_argument('--nothink_top_p', type=float, default=0.8,
                         help='NoThink模式的nucleus sampling参数')
-    parser.add_argument('--nothink_do_sample', action='store_true', default=True,
+    parser.add_argument('--nothink_do_sample', action='store_true', default=False,
                         help='NoThink模式是否使用采样')
     parser.add_argument('--nothink_no_sample', dest='nothink_do_sample', action='store_false',
                         help='NoThink模式禁用采样')
     
     # Think模式生成配置参数
-    parser.add_argument('--think_temperature', type=float, default=0.6,
+    parser.add_argument('--think_temperature', type=float, default=0.0,
                         help='Think模式的温度参数，控制随机性')
     parser.add_argument('--think_top_k', type=int, default=20,
                         help='Think模式的top-k sampling参数')
     parser.add_argument('--think_top_p', type=float, default=0.95,
                         help='Think模式的nucleus sampling参数')
-    parser.add_argument('--think_do_sample', action='store_true', default=True,
+    parser.add_argument('--think_do_sample', action='store_true', default=False,
                         help='Think模式是否使用采样')
     parser.add_argument('--think_no_sample', dest='think_do_sample', action='store_false',
                         help='Think模式禁用采样')

@@ -67,6 +67,17 @@ def calculate_statistics(results: List[Dict]) -> Dict:
         total_nothink = 0
         total_think = 0
         
+        # 新增：交集分析
+        nothink_correct_to_wrong = 0  # 原来正确，干预后错误
+        nothink_wrong_to_correct = 0  # 原来错误，干预后正确
+        nothink_both_correct = 0      # 干预前后都正确
+        nothink_both_wrong = 0        # 干预前后都错误
+        
+        think_correct_to_wrong = 0
+        think_wrong_to_correct = 0
+        think_both_correct = 0
+        think_both_wrong = 0
+        
         for result in results:
             if config_name in result['experiments']:
                 exp_result = result['experiments'][config_name]
@@ -75,19 +86,47 @@ def calculate_statistics(results: List[Dict]) -> Dict:
                 if 'error' in exp_result:
                     continue
                 
+                # NoThink模式分析
                 if 'nothink_mode' in exp_result:
                     total_nothink += 1
-                    if exp_result['nothink_mode']['original_correct']:
+                    orig_correct = exp_result['nothink_mode']['original_correct']
+                    interv_correct = exp_result['nothink_mode']['intervention_correct']
+                    
+                    if orig_correct:
                         nothink_orig_correct += 1
-                    if exp_result['nothink_mode']['intervention_correct']:
+                    if interv_correct:
                         nothink_interv_correct += 1
+                    
+                    # 交集分析
+                    if orig_correct and interv_correct:
+                        nothink_both_correct += 1
+                    elif orig_correct and not interv_correct:
+                        nothink_correct_to_wrong += 1
+                    elif not orig_correct and interv_correct:
+                        nothink_wrong_to_correct += 1
+                    else:  # not orig_correct and not interv_correct
+                        nothink_both_wrong += 1
                 
+                # Think模式分析
                 if 'think_mode' in exp_result:
                     total_think += 1
-                    if exp_result['think_mode']['original_correct']:
+                    orig_correct = exp_result['think_mode']['original_correct']
+                    interv_correct = exp_result['think_mode']['intervention_correct']
+                    
+                    if orig_correct:
                         think_orig_correct += 1
-                    if exp_result['think_mode']['intervention_correct']:
+                    if interv_correct:
                         think_interv_correct += 1
+                    
+                    # 交集分析
+                    if orig_correct and interv_correct:
+                        think_both_correct += 1
+                    elif orig_correct and not interv_correct:
+                        think_correct_to_wrong += 1
+                    elif not orig_correct and interv_correct:
+                        think_wrong_to_correct += 1
+                    else:  # not orig_correct and not interv_correct
+                        think_both_wrong += 1
         
         nothink_orig_acc = (nothink_orig_correct / total_nothink * 100) if total_nothink > 0 else 0
         nothink_interv_acc = (nothink_interv_correct / total_nothink * 100) if total_nothink > 0 else 0
@@ -97,11 +136,23 @@ def calculate_statistics(results: List[Dict]) -> Dict:
         stats[config_name] = {
             'nothink': {
                 'original': {'correct': nothink_orig_correct, 'total': total_nothink, 'accuracy': nothink_orig_acc},
-                'intervention': {'correct': nothink_interv_correct, 'total': total_nothink, 'accuracy': nothink_interv_acc}
+                'intervention': {'correct': nothink_interv_correct, 'total': total_nothink, 'accuracy': nothink_interv_acc},
+                'transition': {
+                    'correct_to_wrong': nothink_correct_to_wrong,
+                    'wrong_to_correct': nothink_wrong_to_correct,
+                    'both_correct': nothink_both_correct,
+                    'both_wrong': nothink_both_wrong
+                }
             },
             'think': {
                 'original': {'correct': think_orig_correct, 'total': total_think, 'accuracy': think_orig_acc},
-                'intervention': {'correct': think_interv_correct, 'total': total_think, 'accuracy': think_interv_acc}
+                'intervention': {'correct': think_interv_correct, 'total': total_think, 'accuracy': think_interv_acc},
+                'transition': {
+                    'correct_to_wrong': think_correct_to_wrong,
+                    'wrong_to_correct': think_wrong_to_correct,
+                    'both_correct': think_both_correct,
+                    'both_wrong': think_both_wrong
+                }
             }
         }
     
@@ -150,7 +201,12 @@ def analyze_by_subject_accuracy(results: List[Dict]) -> Dict:
                 subject_data[subject] = {
                     'nothink_orig_correct': 0, 'nothink_interv_correct': 0,
                     'think_orig_correct': 0, 'think_interv_correct': 0,
-                    'total_nothink': 0, 'total_think': 0
+                    'total_nothink': 0, 'total_think': 0,
+                    # 添加交集分析
+                    'nothink_correct_to_wrong': 0, 'nothink_wrong_to_correct': 0,
+                    'nothink_both_correct': 0, 'nothink_both_wrong': 0,
+                    'think_correct_to_wrong': 0, 'think_wrong_to_correct': 0,
+                    'think_both_correct': 0, 'think_both_wrong': 0
                 }
             
             if config_name in result['experiments']:
@@ -162,17 +218,43 @@ def analyze_by_subject_accuracy(results: List[Dict]) -> Dict:
                 
                 if 'nothink_mode' in exp_result:
                     subject_data[subject]['total_nothink'] += 1
-                    if exp_result['nothink_mode']['original_correct']:
+                    orig_correct = exp_result['nothink_mode']['original_correct']
+                    interv_correct = exp_result['nothink_mode']['intervention_correct']
+                    
+                    if orig_correct:
                         subject_data[subject]['nothink_orig_correct'] += 1
-                    if exp_result['nothink_mode']['intervention_correct']:
+                    if interv_correct:
                         subject_data[subject]['nothink_interv_correct'] += 1
+                    
+                    # 交集分析
+                    if orig_correct and interv_correct:
+                        subject_data[subject]['nothink_both_correct'] += 1
+                    elif orig_correct and not interv_correct:
+                        subject_data[subject]['nothink_correct_to_wrong'] += 1
+                    elif not orig_correct and interv_correct:
+                        subject_data[subject]['nothink_wrong_to_correct'] += 1
+                    else:
+                        subject_data[subject]['nothink_both_wrong'] += 1
                 
                 if 'think_mode' in exp_result:
                     subject_data[subject]['total_think'] += 1
-                    if exp_result['think_mode']['original_correct']:
+                    orig_correct = exp_result['think_mode']['original_correct']
+                    interv_correct = exp_result['think_mode']['intervention_correct']
+                    
+                    if orig_correct:
                         subject_data[subject]['think_orig_correct'] += 1
-                    if exp_result['think_mode']['intervention_correct']:
+                    if interv_correct:
                         subject_data[subject]['think_interv_correct'] += 1
+                    
+                    # 交集分析
+                    if orig_correct and interv_correct:
+                        subject_data[subject]['think_both_correct'] += 1
+                    elif orig_correct and not interv_correct:
+                        subject_data[subject]['think_correct_to_wrong'] += 1
+                    elif not orig_correct and interv_correct:
+                        subject_data[subject]['think_wrong_to_correct'] += 1
+                    else:
+                        subject_data[subject]['think_both_wrong'] += 1
         
         # 计算每个subject的准确率
         for subject, data in subject_data.items():
@@ -184,11 +266,23 @@ def analyze_by_subject_accuracy(results: List[Dict]) -> Dict:
             subject_accuracy_stats[config_name][subject] = {
                 'nothink': {
                     'original': {'correct': data['nothink_orig_correct'], 'total': data['total_nothink'], 'accuracy': nothink_orig_acc},
-                    'intervention': {'correct': data['nothink_interv_correct'], 'total': data['total_nothink'], 'accuracy': nothink_interv_acc}
+                    'intervention': {'correct': data['nothink_interv_correct'], 'total': data['total_nothink'], 'accuracy': nothink_interv_acc},
+                    'transition': {
+                        'correct_to_wrong': data['nothink_correct_to_wrong'],
+                        'wrong_to_correct': data['nothink_wrong_to_correct'],
+                        'both_correct': data['nothink_both_correct'],
+                        'both_wrong': data['nothink_both_wrong']
+                    }
                 },
                 'think': {
                     'original': {'correct': data['think_orig_correct'], 'total': data['total_think'], 'accuracy': think_orig_acc},
-                    'intervention': {'correct': data['think_interv_correct'], 'total': data['total_think'], 'accuracy': think_interv_acc}
+                    'intervention': {'correct': data['think_interv_correct'], 'total': data['total_think'], 'accuracy': think_interv_acc},
+                    'transition': {
+                        'correct_to_wrong': data['think_correct_to_wrong'],
+                        'wrong_to_correct': data['think_wrong_to_correct'],
+                        'both_correct': data['think_both_correct'],
+                        'both_wrong': data['think_both_wrong']
+                    }
                 }
             }
     
@@ -218,7 +312,10 @@ def analyze_by_level(results: List[Dict]) -> Dict:
                 level_data[level] = {
                     'nothink_orig_correct': 0, 'nothink_interv_correct': 0,
                     'think_orig_correct': 0, 'think_interv_correct': 0,
-                    'total_nothink': 0, 'total_think': 0
+                    'total_nothink': 0, 'total_think': 0,
+                    # 添加交集分析
+                    'nothink_correct_to_wrong': 0, 'nothink_wrong_to_correct': 0,
+                    'think_correct_to_wrong': 0, 'think_wrong_to_correct': 0
                 }
             
             if config_name in result['experiments']:
@@ -230,17 +327,35 @@ def analyze_by_level(results: List[Dict]) -> Dict:
                 
                 if 'nothink_mode' in exp_result:
                     level_data[level]['total_nothink'] += 1
-                    if exp_result['nothink_mode']['original_correct']:
+                    orig_correct = exp_result['nothink_mode']['original_correct']
+                    interv_correct = exp_result['nothink_mode']['intervention_correct']
+                    
+                    if orig_correct:
                         level_data[level]['nothink_orig_correct'] += 1
-                    if exp_result['nothink_mode']['intervention_correct']:
+                    if interv_correct:
                         level_data[level]['nothink_interv_correct'] += 1
+                    
+                    # 交集分析
+                    if orig_correct and not interv_correct:
+                        level_data[level]['nothink_correct_to_wrong'] += 1
+                    elif not orig_correct and interv_correct:
+                        level_data[level]['nothink_wrong_to_correct'] += 1
                 
                 if 'think_mode' in exp_result:
                     level_data[level]['total_think'] += 1
-                    if exp_result['think_mode']['original_correct']:
+                    orig_correct = exp_result['think_mode']['original_correct']
+                    interv_correct = exp_result['think_mode']['intervention_correct']
+                    
+                    if orig_correct:
                         level_data[level]['think_orig_correct'] += 1
-                    if exp_result['think_mode']['intervention_correct']:
+                    if interv_correct:
                         level_data[level]['think_interv_correct'] += 1
+                    
+                    # 交集分析
+                    if orig_correct and not interv_correct:
+                        level_data[level]['think_correct_to_wrong'] += 1
+                    elif not orig_correct and interv_correct:
+                        level_data[level]['think_wrong_to_correct'] += 1
         
         # 计算每个level的准确率
         for level, data in level_data.items():
@@ -309,6 +424,63 @@ def generate_report(stats: Dict, subject_stats: Dict, subject_accuracy_stats: Di
                    f"NT{nothink_trend}{nothink_change:+.1f}%, T{think_trend}{think_change:+.1f}% |\n")
         
         f.write("\n")
+        
+        # 干预效果交集分析
+        f.write("## 干预效果交集分析\n\n")
+        f.write("分析干预前后答案正确性的变化情况：\n\n")
+        
+        for config_name, config_stats in stats.items():
+            f.write(f"### {config_name} - 干预效果详细分析\n\n")
+            
+            nothink_trans = config_stats['nothink']['transition']
+            think_trans = config_stats['think']['transition']
+            
+            f.write("#### NoThink模式交集分析\n\n")
+            f.write("| 变化类型 | 问题数 | 占比 | 描述 |\n")
+            f.write("|----------|--------|------|----- |\n")
+            
+            total_nothink = config_stats['nothink']['original']['total']
+            
+            f.write(f"| 保持正确 | {nothink_trans['both_correct']} | {nothink_trans['both_correct']/total_nothink*100:.1f}% | 干预前后都正确 |\n")
+            f.write(f"| 保持错误 | {nothink_trans['both_wrong']} | {nothink_trans['both_wrong']/total_nothink*100:.1f}% | 干预前后都错误 |\n")
+            f.write(f"| 正确→错误 | {nothink_trans['correct_to_wrong']} | {nothink_trans['correct_to_wrong']/total_nothink*100:.1f}% | 原来正确，干预后错误 |\n")
+            f.write(f"| 错误→正确 | {nothink_trans['wrong_to_correct']} | {nothink_trans['wrong_to_correct']/total_nothink*100:.1f}% | 原来错误，干预后正确 |\n")
+            f.write(f"| **总计** | **{total_nothink}** | **100.0%** | 所有问题 |\n")
+            
+            # 计算净改善
+            net_improvement_nothink = nothink_trans['wrong_to_correct'] - nothink_trans['correct_to_wrong']
+            improvement_rate_nothink = net_improvement_nothink / total_nothink * 100
+            
+            f.write(f"\n**NoThink净改善**: {net_improvement_nothink:+d} 个问题 ({improvement_rate_nothink:+.1f}%)\n\n")
+            
+            f.write("#### Think模式交集分析\n\n")
+            f.write("| 变化类型 | 问题数 | 占比 | 描述 |\n")
+            f.write("|----------|--------|------|----- |\n")
+            
+            total_think = config_stats['think']['original']['total']
+            
+            f.write(f"| 保持正确 | {think_trans['both_correct']} | {think_trans['both_correct']/total_think*100:.1f}% | 干预前后都正确 |\n")
+            f.write(f"| 保持错误 | {think_trans['both_wrong']} | {think_trans['both_wrong']/total_think*100:.1f}% | 干预前后都错误 |\n")
+            f.write(f"| 正确→错误 | {think_trans['correct_to_wrong']} | {think_trans['correct_to_wrong']/total_think*100:.1f}% | 原来正确，干预后错误 |\n")
+            f.write(f"| 错误→正确 | {think_trans['wrong_to_correct']} | {think_trans['wrong_to_correct']/total_think*100:.1f}% | 原来错误，干预后正确 |\n")
+            f.write(f"| **总计** | **{total_think}** | **100.0%** | 所有问题 |\n")
+            
+            # 计算净改善
+            net_improvement_think = think_trans['wrong_to_correct'] - think_trans['correct_to_wrong']
+            improvement_rate_think = net_improvement_think / total_think * 100
+            
+            f.write(f"\n**Think净改善**: {net_improvement_think:+d} 个问题 ({improvement_rate_think:+.1f}%)\n\n")
+            
+            # 模式对比
+            f.write("#### 模式对比总结\n\n")
+            f.write("| 指标 | NoThink模式 | Think模式 | 差异 |\n")
+            f.write("|------|-------------|-----------|------|\n")
+            f.write(f"| 干预受益问题数 | {nothink_trans['wrong_to_correct']} | {think_trans['wrong_to_correct']} | {think_trans['wrong_to_correct'] - nothink_trans['wrong_to_correct']:+d} |\n")
+            f.write(f"| 干预损害问题数 | {nothink_trans['correct_to_wrong']} | {think_trans['correct_to_wrong']} | {think_trans['correct_to_wrong'] - nothink_trans['correct_to_wrong']:+d} |\n")
+            f.write(f"| 净改善问题数 | {net_improvement_nothink:+d} | {net_improvement_think:+d} | {net_improvement_think - net_improvement_nothink:+d} |\n")
+            f.write(f"| 净改善率 | {improvement_rate_nothink:+.1f}% | {improvement_rate_think:+.1f}% | {improvement_rate_think - improvement_rate_nothink:+.1f}% |\n")
+            
+            f.write("\n")
         
         # 按学科准确率分析
         f.write("## 按学科准确率分析\n\n")
@@ -405,7 +577,7 @@ def generate_report(stats: Dict, subject_stats: Dict, subject_accuracy_stats: Di
 
 def main():
     """主函数"""
-    results_dir = "math_intervention_results"
+    results_dir = "math_intervention_results_think_bynode"
     
     if not os.path.exists(results_dir):
         print(f"错误：找不到结果目录 {results_dir}")
@@ -446,18 +618,26 @@ def main():
         think_orig = config_stats['think']['original']
         think_interv = config_stats['think']['intervention']
         
+        nothink_trans = config_stats['nothink']['transition']
+        think_trans = config_stats['think']['transition']
+        
         print(f"  NoThink模式: {nothink_orig['accuracy']:.1f}% → {nothink_interv['accuracy']:.1f}% "
               f"({nothink_interv['accuracy'] - nothink_orig['accuracy']:+.1f}%)")
         print(f"  Think模式:   {think_orig['accuracy']:.1f}% → {think_interv['accuracy']:.1f}% "
               f"({think_interv['accuracy'] - think_orig['accuracy']:+.1f}%)")
+        
+        # 添加交集分析简要信息
+        print(f"  交集分析:")
+        print(f"    NoThink: 正确→错误({nothink_trans['correct_to_wrong']}) vs 错误→正确({nothink_trans['wrong_to_correct']}) = 净改善({nothink_trans['wrong_to_correct'] - nothink_trans['correct_to_wrong']:+d})")
+        print(f"    Think:   正确→错误({think_trans['correct_to_wrong']}) vs 错误→正确({think_trans['wrong_to_correct']}) = 净改善({think_trans['wrong_to_correct'] - think_trans['correct_to_wrong']:+d})")
     
     # 打印按学科的简要统计
     print(f"\n=== 按学科统计 ===")
     
     for config_name, config_subject_stats in subject_accuracy_stats.items():
         print(f"\n配置: {config_name}")
-        print("学科                  | NoThink变化 | Think变化 | 问题数")
-        print("---------------------|-------------|-----------|-------")
+        print("学科                  | NoThink变化 | Think变化 | NT净改善 | T净改善 | 问题数")
+        print("---------------------|-------------|-----------|----------|---------|-------")
         
         # 按问题数量排序
         sorted_subjects = sorted(config_subject_stats.items(), key=lambda x: x[1]['nothink']['original']['total'], reverse=True)
@@ -465,9 +645,14 @@ def main():
         for subject, subject_data in sorted_subjects:
             nothink_change = subject_data['nothink']['intervention']['accuracy'] - subject_data['nothink']['original']['accuracy']
             think_change = subject_data['think']['intervention']['accuracy'] - subject_data['think']['original']['accuracy']
+            
+            # 计算净改善
+            nothink_net = subject_data['nothink']['transition']['wrong_to_correct'] - subject_data['nothink']['transition']['correct_to_wrong']
+            think_net = subject_data['think']['transition']['wrong_to_correct'] - subject_data['think']['transition']['correct_to_wrong']
+            
             total_problems_subject = subject_data['nothink']['original']['total']
             
-            print(f"{subject:20} | {nothink_change:+6.1f}%     | {think_change:+6.1f}%   | {total_problems_subject:4d}")
+            print(f"{subject:20} | {nothink_change:+6.1f}%     | {think_change:+6.1f}%   | {nothink_net:+4d}     | {think_net:+4d}    | {total_problems_subject:4d}")
     
     # 打印按难度等级的简要统计
     print(f"\n=== 按难度等级统计 ===")

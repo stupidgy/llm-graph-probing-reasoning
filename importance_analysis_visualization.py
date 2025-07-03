@@ -1128,7 +1128,10 @@ class ImportanceAnalyzer:
         # 7. 找到前k个重要元素
         top_elements_results = self.find_top_important_elements(output_dir, find_top_k)
         
-        # 8. 保存结果
+        # 8. 计算基于边重要性的节点度重要性
+        degree_results = self.compute_node_degree_importance(output_dir, find_top_k)
+        
+        # 9. 保存结果
         self.save_analysis_results(analysis_results, output_dir)
         
         print("重要性分析完成！")
@@ -1139,8 +1142,10 @@ class ImportanceAnalyzer:
         print("- 分析结果: importance_analysis_results.json")
         print(f"- 前{find_top_k}个重要元素: top_{find_top_k}_important_elements.json, top_{find_top_k}_important_elements_report.txt")
         print(f"- 前{find_top_k}个重要元素可视化: top_{find_top_k}_elements_comparison.png, top_{find_top_k}_distribution_comparison.png")
+        print(f"- 节点度重要性分析: node_degree_importance_top_{find_top_k}.json, node_degree_importance_top_{find_top_k}_report.txt")
+        print(f"- 节点度重要性可视化: node_degree_importance_top_{find_top_k}.png, node_degree_distribution_comparison_top_{find_top_k}.png, node_degree_correlation_analysis_top_{find_top_k}.png")
         
-        return analysis_results, top_elements_results
+        return analysis_results, top_elements_results, degree_results
 
     @staticmethod
     def find_top_elements_from_saved_matrices(matrices_dir, output_dir=None, top_k=10, num_nodes=1024):
@@ -1457,6 +1462,218 @@ class ImportanceAnalyzer:
         plt.savefig(os.path.join(output_dir, f'top_{top_k}_distribution_comparison.png'), 
                    dpi=300, bbox_inches='tight')
         plt.close()
+    
+    def compute_node_degree_importance(self, output_dir, top_k=10):
+        """
+        使用边的平均重要性矩阵按行和列求度后的平均作为节点的重要性
+        
+        Args:
+            output_dir: 输出目录
+            top_k: 返回前k个重要节点，默认10
+        """
+        print("计算基于边重要性的节点度重要性...")
+        
+        if not self.avg_matrices:
+            print("未找到平均矩阵，请先运行compute_average_matrices()")
+            return
+        
+        degree_results = {}
+        
+        for category in ['think', 'nothink', 'combined']:
+            if self.avg_matrices[category]['edge_importance'] is not None:
+                print(f"处理 {category} 类别的边重要性...")
+                
+                edge_importance = self.avg_matrices[category]['edge_importance']
+                
+                # 重构邻接矩阵
+                adjacency_matrix = np.zeros((self.num_nodes, self.num_nodes))
+                
+                for edge_idx, importance in enumerate(edge_importance):
+                    src, dst = self.get_edge_endpoints_from_index(edge_idx)
+                    
+                    # 验证节点索引有效性
+                    if src < self.num_nodes and dst < self.num_nodes and src >= 0 and dst >= 0:
+                        adjacency_matrix[src, dst] = importance
+                
+                # 计算每个节点的度重要性
+                # 出度：行求和（作为源节点的重要性）
+                out_degree_importance = np.sum(adjacency_matrix, axis=1)
+                # 入度：列求和（作为目标节点的重要性）
+                in_degree_importance = np.sum(adjacency_matrix, axis=0)
+                
+                # 节点重要性：入度和出度的平均
+                node_degree_importance = (out_degree_importance + in_degree_importance) / 2
+                
+                # 找到前k个重要节点
+                top_node_indices = np.argsort(node_degree_importance)[-top_k:][::-1]  # 降序排列
+                top_node_values = node_degree_importance[top_node_indices]
+                
+                degree_results[category] = {
+                    'node_degree_importance': node_degree_importance,
+                    'top_nodes': {
+                        'indices': top_node_indices.tolist(),
+                        'values': top_node_values.tolist(),
+                        'mean_importance': float(np.mean(top_node_values)),
+                        'std_importance': float(np.std(top_node_values))
+                    }
+                }
+                
+                print(f"{category} - 前{top_k}个度重要性节点:")
+                for i, (idx, val) in enumerate(zip(top_node_indices, top_node_values)):
+                    print(f"  第{i+1}名: 节点{idx}, 度重要性={val:.6f}")
+                print()
+        
+        # 保存结果
+        self._save_degree_importance_results(degree_results, output_dir, top_k)
+        
+        # 创建可视化
+        self._visualize_degree_importance(degree_results, output_dir, top_k)
+        
+        return degree_results
+    
+    def _save_degree_importance_results(self, results, output_dir, top_k):
+        """保存节点度重要性结果"""
+        print("保存节点度重要性结果...")
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # 为JSON保存创建一个简化的结果副本（不包含完整的数组）
+        json_results = {}
+        for category in results:
+            json_results[category] = {
+                'top_nodes': results[category]['top_nodes']
+            }
+        
+        # 保存详细结果到JSON
+        results_file = os.path.join(output_dir, f'node_degree_importance_top_{top_k}.json')
+        with open(results_file, 'w', encoding='utf-8') as f:
+            json.dump(json_results, f, indent=2, ensure_ascii=False)
+        
+        # 保存numpy矩阵
+        for category in results:
+            # 保存节点度重要性向量
+            np.save(
+                os.path.join(output_dir, f'{category}_node_degree_importance.npy'),
+                results[category]['node_degree_importance']
+            )
+        
+        # 创建可读的文本报告
+        report_file = os.path.join(output_dir, f'node_degree_importance_top_{top_k}_report.txt')
+        with open(report_file, 'w', encoding='utf-8') as f:
+            f.write(f"基于边重要性的节点度重要性分析报告（前{top_k}个）\n")
+            f.write("=" * 60 + "\n\n")
+            f.write("计算方法：\n")
+            f.write("1. 从边重要性向量重构邻接矩阵（有向图）\n")
+            f.write("2. 计算每个节点的出度重要性（行求和）\n")
+            f.write("3. 计算每个节点的入度重要性（列求和）\n")
+            f.write("4. 节点度重要性 = (出度重要性 + 入度重要性) / 2\n\n")
+            
+            for category in ['think', 'nothink', 'combined']:
+                if category in results:
+                    f.write(f"{category.upper()} 类别分析:\n")
+                    f.write("-" * 40 + "\n")
+                    
+                    top_nodes = results[category]['top_nodes']
+                    for i, (idx, val) in enumerate(zip(
+                        top_nodes['indices'], top_nodes['values'])):
+                        f.write(f"第{i+1}名: 节点{idx}\n")
+                        f.write(f"  度重要性: {val:.6f}\n\n")
+                    
+                    f.write(f"统计信息:\n")
+                    f.write(f"  平均度重要性: {top_nodes['mean_importance']:.6f}\n")
+                    f.write(f"  标准差: {top_nodes['std_importance']:.6f}\n\n")
+        
+        print(f"节点度重要性结果已保存到:")
+        print(f"  JSON格式: {results_file}")
+        print(f"  文本报告: {report_file}")
+        print(f"  NumPy矩阵: {category}_node_degree_importance.npy")
+    
+    def _visualize_degree_importance(self, results, output_dir, top_k):
+        """可视化节点度重要性"""
+        print(f"创建节点度重要性可视化...")
+        
+        # 创建简单的排名对比图
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        fig.suptitle(f'Node Degree Importance Analysis (Top {top_k})', fontsize=16, fontweight='bold')
+        
+        categories = ['think', 'nothink', 'combined']
+        colors = {'think': '#2E8B57', 'nothink': '#DC143C', 'combined': '#4169E1'}
+        
+        # 前k个节点度重要性对比
+        for i, category in enumerate(categories):
+            if category in results:
+                ax = axes[i]
+                top_nodes = results[category]['top_nodes']
+                indices = top_nodes['indices']
+                values = top_nodes['values']
+                
+                bars = ax.bar(range(len(indices)), values, color=colors[category], alpha=0.7)
+                ax.set_xlabel('Rank')
+                ax.set_ylabel('Node Degree Importance')
+                ax.set_title(f'{category.capitalize()} - Top {top_k} Nodes')
+                ax.set_xticks(range(len(indices)))
+                ax.set_xticklabels([f'{i+1}' for i in range(len(indices))])
+                
+                # 在柱子上添加节点索引
+                for j, (bar, idx) in enumerate(zip(bars, indices)):
+                    ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(values)*0.01,
+                           f'N{idx}', ha='center', va='bottom', fontsize=8)
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, f'node_degree_importance_top_{top_k}.png'), 
+                   dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        # 创建箱线图对比
+        self._create_simple_degree_comparison(results, output_dir, top_k)
+    
+    def _create_simple_degree_comparison(self, results, output_dir, top_k):
+        """创建简单的度重要性对比图"""
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        fig.suptitle(f'Node Degree Importance Comparison (Top {top_k})', fontsize=16, fontweight='bold')
+        
+        colors = {'think': '#2E8B57', 'nothink': '#DC143C', 'combined': '#4169E1'}
+        
+        # 箱线图
+        degree_data = []
+        degree_labels = []
+        for category in ['think', 'nothink', 'combined']:
+            if category in results:
+                degree_data.append(results[category]['top_nodes']['values'])
+                degree_labels.append(category.capitalize())
+        
+        if degree_data:
+            bp = ax1.boxplot(degree_data, labels=degree_labels, patch_artist=True)
+            for patch, category in zip(bp['boxes'], ['think', 'nothink', 'combined'][:len(bp['boxes'])]):
+                patch.set_facecolor(colors[category])
+                patch.set_alpha(0.7)
+        
+        ax1.set_ylabel('Node Degree Importance')
+        ax1.set_title(f'Top {top_k} Node Degree Importance Distribution')
+        
+        # 平均值对比
+        categories_list = []
+        degree_means = []
+        
+        for category in ['think', 'nothink', 'combined']:
+            if category in results:
+                categories_list.append(category.capitalize())
+                degree_means.append(results[category]['top_nodes']['mean_importance'])
+        
+        if categories_list:
+            bars = ax2.bar(categories_list, degree_means, 
+                          color=[colors[cat.lower()] for cat in categories_list], alpha=0.7)
+            ax2.set_ylabel('Mean Degree Importance')
+            ax2.set_title(f'Mean Degree Importance (Top {top_k})')
+            
+            # 在柱子上添加数值
+            for bar, value in zip(bars, degree_means):
+                ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(degree_means)*0.01,
+                        f'{value:.4f}', ha='center', va='bottom', fontsize=10)
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, f'node_degree_comparison_top_{top_k}.png'), 
+                   dpi=300, bbox_inches='tight')
+        plt.close()
 
 
 def main():
@@ -1468,17 +1685,113 @@ def main():
     parser.add_argument('--layer', type=int, default=14,
                        help='指定分析的layer（默认分析所有layer）')
     parser.add_argument('--top_k', type=int, default=20,
-                       help='查找前k个最重要的元素（默认10）')
+                       help='查找前k个最重要的元素（默认20）')
+    parser.add_argument('--num_nodes', type=int, default=1024,
+                       help='全连接网络的节点数（默认1024）')
+    parser.add_argument('--degree_only', action='store_true',
+                       help='仅计算节点度重要性分析（需要已存在的平均矩阵）')
+    
+    args = parser.parse_args()
+    
+    if args.degree_only:
+        # 只运行节点度重要性分析
+        print("仅运行节点度重要性分析...")
+        analyzer = ImportanceAnalyzer(args.results_dir, args.num_nodes)
+        
+        # 尝试加载已存在的平均矩阵
+        matrices_exist = True
+        for category in ['think', 'nothink', 'combined']:
+            edge_file = os.path.join(args.output_dir, f'{category}_avg_edge_importance.npy')
+            if not os.path.exists(edge_file):
+                matrices_exist = False
+                break
+        
+        if matrices_exist:
+            # 手动加载平均矩阵
+            analyzer.avg_matrices = {
+                'think': {'node_importance': None, 'edge_importance': None},
+                'nothink': {'node_importance': None, 'edge_importance': None},
+                'combined': {'node_importance': None, 'edge_importance': None}
+            }
+            
+            for category in ['think', 'nothink', 'combined']:
+                edge_file = os.path.join(args.output_dir, f'{category}_avg_edge_importance.npy')
+                if os.path.exists(edge_file):
+                    analyzer.avg_matrices[category]['edge_importance'] = np.load(edge_file)
+                    print(f"加载 {category} 边重要性矩阵: {analyzer.avg_matrices[category]['edge_importance'].shape}")
+                
+                node_file = os.path.join(args.output_dir, f'{category}_avg_node_importance.npy')
+                if os.path.exists(node_file):
+                    analyzer.avg_matrices[category]['node_importance'] = np.load(node_file)
+                    print(f"加载 {category} 节点重要性矩阵: {analyzer.avg_matrices[category]['node_importance'].shape}")
+            
+            # 运行节点度重要性分析
+            degree_results = analyzer.compute_node_degree_importance(args.output_dir, args.top_k)
+            print(f"节点度重要性分析结果已保存到: {args.output_dir}")
+        else:
+            print("错误：未找到必要的平均矩阵文件，请先运行完整分析。")
+            print("缺失文件：*_avg_edge_importance.npy")
+    else:
+        # 创建分析器并运行完整分析
+        analyzer = ImportanceAnalyzer(args.results_dir, args.num_nodes)
+        results = analyzer.run_complete_analysis(args.output_dir, args.layer, args.top_k)
+        
+        print(f"分析结果已保存到: {args.output_dir}")
+
+
+def compute_degree_importance_only():
+    """独立函数：仅计算节点度重要性，不重新计算其他矩阵"""
+    parser = argparse.ArgumentParser(description='从已保存的边重要性矩阵中计算节点度重要性')
+    parser.add_argument('--matrices_dir', type=str, required=True,
+                       help='已保存矩阵的目录路径')
+    parser.add_argument('--output_dir', type=str, default=None,
+                       help='输出目录路径（默认使用matrices_dir）')
+    parser.add_argument('--top_k', type=int, default=20,
+                       help='查找前k个最重要的节点（默认10）')
     parser.add_argument('--num_nodes', type=int, default=1024,
                        help='全连接网络的节点数（默认1024）')
     
     args = parser.parse_args()
     
-    # 创建分析器并运行分析
-    analyzer = ImportanceAnalyzer(args.results_dir, args.num_nodes)
-    results, top_elements = analyzer.run_complete_analysis(args.output_dir, args.layer, args.top_k)
+    output_dir = args.output_dir if args.output_dir else args.matrices_dir
     
-    print(f"分析结果已保存到: {args.output_dir}")
+    # 创建临时分析器
+    analyzer = ImportanceAnalyzer("", args.num_nodes)  # 空路径，因为我们不需要加载原始数据
+    
+    # 加载已保存的平均矩阵
+    analyzer.avg_matrices = {
+        'think': {'node_importance': None, 'edge_importance': None},
+        'nothink': {'node_importance': None, 'edge_importance': None},
+        'combined': {'node_importance': None, 'edge_importance': None}
+    }
+    
+    matrices_loaded = False
+    for category in ['think', 'nothink', 'combined']:
+        edge_file = os.path.join(args.matrices_dir, f'{category}_avg_edge_importance.npy')
+        if os.path.exists(edge_file):
+            try:
+                analyzer.avg_matrices[category]['edge_importance'] = np.load(edge_file)
+                print(f"加载 {category} 边重要性矩阵: {analyzer.avg_matrices[category]['edge_importance'].shape}")
+                matrices_loaded = True
+            except Exception as e:
+                print(f"加载{category}边重要性矩阵失败: {e}")
+        
+        # 可选：加载节点重要性矩阵（用于对比分析）
+        node_file = os.path.join(args.matrices_dir, f'{category}_avg_node_importance.npy')
+        if os.path.exists(node_file):
+            try:
+                analyzer.avg_matrices[category]['node_importance'] = np.load(node_file)
+                print(f"加载 {category} 节点重要性矩阵: {analyzer.avg_matrices[category]['node_importance'].shape}")
+            except Exception as e:
+                print(f"加载{category}节点重要性矩阵失败: {e}")
+    
+    if matrices_loaded:
+        # 计算节点度重要性
+        degree_results = analyzer.compute_node_degree_importance(output_dir, args.top_k)
+        print(f"节点度重要性分析结果已保存到: {output_dir}")
+    else:
+        print("错误：未找到任何边重要性矩阵文件")
+        print("需要的文件格式: {think|nothink|combined}_avg_edge_importance.npy")
 
 
 def find_top_elements_only():
@@ -1507,10 +1820,17 @@ def find_top_elements_only():
 if __name__ == "__main__":
     import sys
     
-    # 检查是否只是要查找前k个重要元素
-    if len(sys.argv) > 1 and sys.argv[1] == 'find_top_only':
-        # 移除'find_top_only'参数，让argparse正常解析剩余参数
-        sys.argv.pop(1)
-        find_top_elements_only()
+    # 检查运行模式
+    if len(sys.argv) > 1:
+        if sys.argv[1] == 'find_top_only':
+            # 移除'find_top_only'参数，让argparse正常解析剩余参数
+            sys.argv.pop(1)
+            find_top_elements_only()
+        elif sys.argv[1] == 'degree_only':
+            # 移除'degree_only'参数，让argparse正常解析剩余参数
+            sys.argv.pop(1)
+            compute_degree_importance_only()
+        else:
+            main()
     else:
-        main() 
+        main()
