@@ -313,9 +313,11 @@ def analyze_by_level(results: List[Dict]) -> Dict:
                     'nothink_orig_correct': 0, 'nothink_interv_correct': 0,
                     'think_orig_correct': 0, 'think_interv_correct': 0,
                     'total_nothink': 0, 'total_think': 0,
-                    # 添加交集分析
+                    # 添加完整的交集分析
                     'nothink_correct_to_wrong': 0, 'nothink_wrong_to_correct': 0,
-                    'think_correct_to_wrong': 0, 'think_wrong_to_correct': 0
+                    'nothink_both_correct': 0, 'nothink_both_wrong': 0,
+                    'think_correct_to_wrong': 0, 'think_wrong_to_correct': 0,
+                    'think_both_correct': 0, 'think_both_wrong': 0
                 }
             
             if config_name in result['experiments']:
@@ -335,11 +337,15 @@ def analyze_by_level(results: List[Dict]) -> Dict:
                     if interv_correct:
                         level_data[level]['nothink_interv_correct'] += 1
                     
-                    # 交集分析
-                    if orig_correct and not interv_correct:
+                    # 完整的交集分析
+                    if orig_correct and interv_correct:
+                        level_data[level]['nothink_both_correct'] += 1
+                    elif orig_correct and not interv_correct:
                         level_data[level]['nothink_correct_to_wrong'] += 1
                     elif not orig_correct and interv_correct:
                         level_data[level]['nothink_wrong_to_correct'] += 1
+                    else:  # not orig_correct and not interv_correct
+                        level_data[level]['nothink_both_wrong'] += 1
                 
                 if 'think_mode' in exp_result:
                     level_data[level]['total_think'] += 1
@@ -351,11 +357,15 @@ def analyze_by_level(results: List[Dict]) -> Dict:
                     if interv_correct:
                         level_data[level]['think_interv_correct'] += 1
                     
-                    # 交集分析
-                    if orig_correct and not interv_correct:
+                    # 完整的交集分析
+                    if orig_correct and interv_correct:
+                        level_data[level]['think_both_correct'] += 1
+                    elif orig_correct and not interv_correct:
                         level_data[level]['think_correct_to_wrong'] += 1
                     elif not orig_correct and interv_correct:
                         level_data[level]['think_wrong_to_correct'] += 1
+                    else:  # not orig_correct and not interv_correct
+                        level_data[level]['think_both_wrong'] += 1
         
         # 计算每个level的准确率
         for level, data in level_data.items():
@@ -367,11 +377,23 @@ def analyze_by_level(results: List[Dict]) -> Dict:
             level_stats[config_name][level] = {
                 'nothink': {
                     'original': {'correct': data['nothink_orig_correct'], 'total': data['total_nothink'], 'accuracy': nothink_orig_acc},
-                    'intervention': {'correct': data['nothink_interv_correct'], 'total': data['total_nothink'], 'accuracy': nothink_interv_acc}
+                    'intervention': {'correct': data['nothink_interv_correct'], 'total': data['total_nothink'], 'accuracy': nothink_interv_acc},
+                    'transition': {
+                        'correct_to_wrong': data['nothink_correct_to_wrong'],
+                        'wrong_to_correct': data['nothink_wrong_to_correct'],
+                        'both_correct': data['nothink_both_correct'],
+                        'both_wrong': data['nothink_both_wrong']
+                    }
                 },
                 'think': {
                     'original': {'correct': data['think_orig_correct'], 'total': data['total_think'], 'accuracy': think_orig_acc},
-                    'intervention': {'correct': data['think_interv_correct'], 'total': data['total_think'], 'accuracy': think_interv_acc}
+                    'intervention': {'correct': data['think_interv_correct'], 'total': data['total_think'], 'accuracy': think_interv_acc},
+                    'transition': {
+                        'correct_to_wrong': data['think_correct_to_wrong'],
+                        'wrong_to_correct': data['think_wrong_to_correct'],
+                        'both_correct': data['think_both_correct'],
+                        'both_wrong': data['think_both_wrong']
+                    }
                 }
             }
     
@@ -517,6 +539,38 @@ def generate_report(stats: Dict, subject_stats: Dict, subject_accuracy_stats: Di
                        f"{think_trend}{think_change:+.1f}% |\n")
             
             f.write("\n")
+            
+            # 添加按学科的详细转换分析
+            f.write(f"#### {config_name} - 按学科转换分析\n\n")
+            f.write("**NoThink模式转换统计:**\n\n")
+            f.write("| 学科 | 保持正确 | 保持错误 | 正确→错误 | 错误→正确 | 净改善 | 净改善率 |\n")
+            f.write("|------|----------|----------|----------|----------|--------|---------|\n")
+            
+            for subject, subject_data in sorted_subjects:
+                nothink_trans = subject_data['nothink']['transition']
+                total = subject_data['nothink']['original']['total']
+                net_improvement = nothink_trans['wrong_to_correct'] - nothink_trans['correct_to_wrong']
+                net_rate = (net_improvement / total * 100) if total > 0 else 0
+                
+                f.write(f"| {subject} | {nothink_trans['both_correct']} | {nothink_trans['both_wrong']} | "
+                       f"{nothink_trans['correct_to_wrong']} | {nothink_trans['wrong_to_correct']} | "
+                       f"{net_improvement:+d} | {net_rate:+.1f}% |\n")
+            
+            f.write("\n**Think模式转换统计:**\n\n")
+            f.write("| 学科 | 保持正确 | 保持错误 | 正确→错误 | 错误→正确 | 净改善 | 净改善率 |\n")
+            f.write("|------|----------|----------|----------|----------|--------|---------|\n")
+            
+            for subject, subject_data in sorted_subjects:
+                think_trans = subject_data['think']['transition']
+                total = subject_data['think']['original']['total']
+                net_improvement = think_trans['wrong_to_correct'] - think_trans['correct_to_wrong']
+                net_rate = (net_improvement / total * 100) if total > 0 else 0
+                
+                f.write(f"| {subject} | {think_trans['both_correct']} | {think_trans['both_wrong']} | "
+                       f"{think_trans['correct_to_wrong']} | {think_trans['wrong_to_correct']} | "
+                       f"{net_improvement:+d} | {net_rate:+.1f}% |\n")
+            
+            f.write("\n")
         
         # 按难度等级分析
         f.write("## 按难度等级分析\n\n")
@@ -551,6 +605,40 @@ def generate_report(stats: Dict, subject_stats: Dict, subject_accuracy_stats: Di
                        f"{think_trend}{think_change:+.1f}% |\n")
             
             f.write("\n")
+            
+            # 添加按难度等级的详细转换分析
+            f.write(f"#### {config_name} - 按难度等级转换分析\n\n")
+            f.write("**NoThink模式转换统计:**\n\n")
+            f.write("| 难度等级 | 保持正确 | 保持错误 | 正确→错误 | 错误→正确 | 净改善 | 净改善率 |\n")
+            f.write("|----------|----------|----------|----------|----------|--------|---------|\n")
+            
+            for level in sorted(config_level_stats.keys()):
+                level_data = config_level_stats[level]
+                nothink_trans = level_data['nothink']['transition']
+                total = level_data['nothink']['original']['total']
+                net_improvement = nothink_trans['wrong_to_correct'] - nothink_trans['correct_to_wrong']
+                net_rate = (net_improvement / total * 100) if total > 0 else 0
+                
+                f.write(f"| Level {level} | {nothink_trans['both_correct']} | {nothink_trans['both_wrong']} | "
+                       f"{nothink_trans['correct_to_wrong']} | {nothink_trans['wrong_to_correct']} | "
+                       f"{net_improvement:+d} | {net_rate:+.1f}% |\n")
+            
+            f.write("\n**Think模式转换统计:**\n\n")
+            f.write("| 难度等级 | 保持正确 | 保持错误 | 正确→错误 | 错误→正确 | 净改善 | 净改善率 |\n")
+            f.write("|----------|----------|----------|----------|----------|--------|---------|\n")
+            
+            for level in sorted(config_level_stats.keys()):
+                level_data = config_level_stats[level]
+                think_trans = level_data['think']['transition']
+                total = level_data['think']['original']['total']
+                net_improvement = think_trans['wrong_to_correct'] - think_trans['correct_to_wrong']
+                net_rate = (net_improvement / total * 100) if total > 0 else 0
+                
+                f.write(f"| Level {level} | {think_trans['both_correct']} | {think_trans['both_wrong']} | "
+                       f"{think_trans['correct_to_wrong']} | {think_trans['wrong_to_correct']} | "
+                       f"{net_improvement:+d} | {net_rate:+.1f}% |\n")
+            
+            f.write("\n")
         
         # 详细分析
         f.write("## 详细分析\n\n")
@@ -577,7 +665,7 @@ def generate_report(stats: Dict, subject_stats: Dict, subject_accuracy_stats: Di
 
 def main():
     """主函数"""
-    results_dir = "math_intervention_results_think_bynode"
+    results_dir = "math_intervention_results_think_1epoch_43nodes_greedy"
     
     if not os.path.exists(results_dir):
         print(f"错误：找不到结果目录 {results_dir}")
@@ -653,6 +741,36 @@ def main():
             total_problems_subject = subject_data['nothink']['original']['total']
             
             print(f"{subject:20} | {nothink_change:+6.1f}%     | {think_change:+6.1f}%   | {nothink_net:+4d}     | {think_net:+4d}    | {total_problems_subject:4d}")
+        
+        # 添加按学科的详细转换统计
+        print(f"\n=== {config_name} - 按学科详细转换分析 ===")
+        print("\nNoThink模式转换:")
+        print("学科                  | 保持正确 | 保持错误 | 正确→错误 | 错误→正确 | 净改善 | 净改善率")
+        print("---------------------|----------|----------|----------|----------|--------|----------")
+        
+        for subject, subject_data in sorted_subjects:
+            nothink_trans = subject_data['nothink']['transition']
+            total = subject_data['nothink']['original']['total']
+            net_improvement = nothink_trans['wrong_to_correct'] - nothink_trans['correct_to_wrong']
+            net_rate = (net_improvement / total * 100) if total > 0 else 0
+            
+            print(f"{subject:20} | {nothink_trans['both_correct']:8d} | {nothink_trans['both_wrong']:8d} | "
+                  f"{nothink_trans['correct_to_wrong']:8d} | {nothink_trans['wrong_to_correct']:8d} | "
+                  f"{net_improvement:+6d} | {net_rate:+7.1f}%")
+        
+        print(f"\nThink模式转换:")
+        print("学科                  | 保持正确 | 保持错误 | 正确→错误 | 错误→正确 | 净改善 | 净改善率")
+        print("---------------------|----------|----------|----------|----------|--------|----------")
+        
+        for subject, subject_data in sorted_subjects:
+            think_trans = subject_data['think']['transition']
+            total = subject_data['think']['original']['total']
+            net_improvement = think_trans['wrong_to_correct'] - think_trans['correct_to_wrong']
+            net_rate = (net_improvement / total * 100) if total > 0 else 0
+            
+            print(f"{subject:20} | {think_trans['both_correct']:8d} | {think_trans['both_wrong']:8d} | "
+                  f"{think_trans['correct_to_wrong']:8d} | {think_trans['wrong_to_correct']:8d} | "
+                  f"{net_improvement:+6d} | {net_rate:+7.1f}%")
     
     # 打印按难度等级的简要统计
     print(f"\n=== 按难度等级统计 ===")
@@ -669,6 +787,38 @@ def main():
             total_problems_level = level_data['nothink']['original']['total']
             
             print(f"Level {level:2} | {nothink_change:+6.1f}%     | {think_change:+6.1f}%   | {total_problems_level:4d}")
+        
+        # 添加按难度等级的详细转换统计
+        print(f"\n=== {config_name} - 按难度等级详细转换分析 ===")
+        print("\nNoThink模式转换:")
+        print("难度等级 | 保持正确 | 保持错误 | 正确→错误 | 错误→正确 | 净改善 | 净改善率")
+        print("---------|----------|----------|----------|----------|--------|----------")
+        
+        for level in sorted(config_level_stats.keys()):
+            level_data = config_level_stats[level]
+            nothink_trans = level_data['nothink']['transition']
+            total = level_data['nothink']['original']['total']
+            net_improvement = nothink_trans['wrong_to_correct'] - nothink_trans['correct_to_wrong']
+            net_rate = (net_improvement / total * 100) if total > 0 else 0
+            
+            print(f"Level {level:2} | {nothink_trans['both_correct']:8d} | {nothink_trans['both_wrong']:8d} | "
+                  f"{nothink_trans['correct_to_wrong']:8d} | {nothink_trans['wrong_to_correct']:8d} | "
+                  f"{net_improvement:+6d} | {net_rate:+7.1f}%")
+        
+        print(f"\nThink模式转换:")
+        print("难度等级 | 保持正确 | 保持错误 | 正确→错误 | 错误→正确 | 净改善 | 净改善率")
+        print("---------|----------|----------|----------|----------|--------|----------")
+        
+        for level in sorted(config_level_stats.keys()):
+            level_data = config_level_stats[level]
+            think_trans = level_data['think']['transition']
+            total = level_data['think']['original']['total']
+            net_improvement = think_trans['wrong_to_correct'] - think_trans['correct_to_wrong']
+            net_rate = (net_improvement / total * 100) if total > 0 else 0
+            
+            print(f"Level {level:2} | {think_trans['both_correct']:8d} | {think_trans['both_wrong']:8d} | "
+                  f"{think_trans['correct_to_wrong']:8d} | {think_trans['wrong_to_correct']:8d} | "
+                  f"{net_improvement:+6d} | {net_rate:+7.1f}%")
     
     print(f"\n详细报告已保存到: {report_file}")
 

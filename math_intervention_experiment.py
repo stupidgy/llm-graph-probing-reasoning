@@ -15,6 +15,9 @@ import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import math
 from collections import defaultdict
+import pandas as pd
+import pyarrow.parquet as pq
+import glob
 sys.path.append('.')
 sys.path.append('./llm-graph-probing')
 
@@ -36,10 +39,112 @@ class MathInterventionExperiment:
         self.controller = NeuralInterventionController(model_path, device, gpu_id)
         self.results = []
     
+    def load_openr1_math_dataset(self, dataset_dir: str, split: str = "default", 
+                                filter_geometry: bool = True, max_samples: int = None) -> List[Dict]:
+        """
+        加载OpenR1-Math数据集
+        
+        Args:
+            dataset_dir: 数据集目录路径 (如 /data4/huguangyi/datasets/OpenR1-Math)
+            split: 数据集分割类型 ("default", "extended", "all")
+            filter_geometry: 是否只保留几何类型的问题
+            max_samples: 最大样本数（用于测试）
+            
+        Returns:
+            加载的数据列表
+        """
+        print(f"正在加载OpenR1-Math数据集: {dataset_dir}")
+        print(f"数据集分割: {split}")
+        print(f"几何筛选: {filter_geometry}")
+        
+        # 根据分割类型确定数据路径
+        if split == "default":
+            data_path = os.path.join(dataset_dir, "data")
+        elif split == "extended":
+            data_path = os.path.join(dataset_dir, "extended")
+        elif split == "all":
+            data_path = os.path.join(dataset_dir, "all")
+        else:
+            raise ValueError(f"不支持的数据集分割: {split}")
+        
+        # 查找所有parquet文件
+        parquet_files = glob.glob(os.path.join(data_path, "*.parquet"))
+        parquet_files.sort()  # 确保顺序一致
+        
+        if not parquet_files:
+            raise ValueError(f"在 {data_path} 中没有找到parquet文件")
+        
+        print(f"找到 {len(parquet_files)} 个parquet文件")
+        
+        all_data = []
+        geometry_count = 0
+        total_count = 0
+        
+        for parquet_file in parquet_files:
+            print(f"正在处理: {os.path.basename(parquet_file)}")
+            
+            # 读取parquet文件
+            table = pq.read_table(parquet_file)
+            df = table.to_pandas()
+            
+            for _, row in df.iterrows():
+                total_count += 1
+                
+                # 如果需要筛选几何题目
+                if filter_geometry and row['problem_type'] != 'Geometry':
+                    continue
+                
+                geometry_count += 1
+                
+                # 转换为统一格式
+                item = {
+                    'problem': row['problem'],
+                    'answer': row['answer'],
+                    'solution': row['solution'],
+                    'problem_type': row['problem_type'],
+                    'question_type': row['question_type'],
+                    'source': row['source'],
+                    'uuid': row['uuid']
+                }
+                
+                all_data.append(item)
+                
+                # 检查是否达到最大样本数
+                if max_samples and len(all_data) >= max_samples:
+                    break
+            
+            # 检查是否达到最大样本数
+            if max_samples and len(all_data) >= max_samples:
+                break
+        
+        print(f"数据加载完成:")
+        print(f"- 总处理样本数: {total_count}")
+        if filter_geometry:
+            print(f"- 几何题目数量: {geometry_count}")
+            print(f"- 几何题目占比: {geometry_count/total_count*100:.1f}%")
+        print(f"- 最终返回样本数: {len(all_data)}")
+        
+        return all_data
+    
     def load_math_dataset(self, dataset_path: str, max_samples: int = None) -> List[Dict]:
-        """加载MATH数据集"""
+        """加载MATH数据集（保持向后兼容）"""
         print(f"正在加载数据集: {dataset_path}")
         
+        # 检查是否是OpenR1-Math格式的路径
+        if 'OpenR1-Math' in dataset_path:
+            # 如果是目录路径，使用新的加载方法
+            if os.path.isdir(dataset_path):
+                return self.load_openr1_math_dataset(dataset_path, max_samples=max_samples)
+            # 如果指定了具体的分割和筛选选项，解析路径
+            else:
+                # 假设路径格式为: /path/to/OpenR1-Math|split|geometry
+                parts = dataset_path.split('|')
+                base_path = parts[0]
+                split = parts[1] if len(parts) > 1 else "default"
+                filter_geometry = parts[2].lower() == 'geometry' if len(parts) > 2 else True
+                return self.load_openr1_math_dataset(base_path, split, filter_geometry, max_samples)
+        
+        # 原始MATH数据集加载逻辑
         data = []
         with open(dataset_path, 'r', encoding='utf-8') as f:
             for i, line in enumerate(f):
@@ -52,19 +157,163 @@ class MathInterventionExperiment:
         print(f"成功加载 {len(data)} 个数学问题")
         return data
     
-    def stratified_sample_dataset(self, dataset_path: str, target_samples: int = 100, 
-                                 random_seed: int = 42) -> List[Dict]:
+    def stratified_sample_openr1_dataset(self, dataset_dir: str, split: str = "default",
+                                       filter_geometry: bool = True, target_samples: int = 100, 
+                                       random_seed: int = 42) -> List[Dict]:
         """
-        按照level和subject进行分层抽样
+        对OpenR1-Math数据集进行分层抽样
         
         Args:
-            dataset_path: 数据集路径
+            dataset_dir: 数据集目录路径
+            split: 数据集分割类型
+            filter_geometry: 是否只保留几何类型的问题
             target_samples: 目标样本数量
             random_seed: 随机种子
             
         Returns:
             分层抽样后的数据集
         """
+        # 设置随机种子
+        random.seed(random_seed)
+        
+        print(f"正在对OpenR1-Math数据集进行分层抽样")
+        
+        # 加载全部数据
+        full_dataset = self.load_openr1_math_dataset(dataset_dir, split, filter_geometry)
+        
+        # 按source和question_type分组
+        strata = defaultdict(list)
+        strata_counts = defaultdict(int)
+        
+        for item in full_dataset:
+            source = item.get('source', 'Unknown')
+            question_type = item.get('question_type', 'Unknown')
+            key = f"{source}_{question_type}"
+            strata[key].append(item)
+            strata_counts[key] += 1
+        
+        print(f"\n数据集分层统计:")
+        print("=" * 60)
+        print(f"{'来源_题目类型':<30} {'数量':<8} {'占比':<8}")
+        print("-" * 60)
+        
+        total_items = len(full_dataset)
+        for key, count in sorted(strata_counts.items()):
+            percentage = count / total_items * 100
+            print(f"{key:<30} {count:<8} {percentage:>6.1f}%")
+        
+        print("-" * 60)
+        print(f"{'总计':<30} {total_items:<8} {'100.0%':<8}")
+        print("=" * 60)
+        
+        # 计算每个层级应该抽取的样本数（按比例分配）
+        sampled_data = []
+        allocation_info = []
+        
+        for key, items in strata.items():
+            # 按比例计算应抽取的样本数
+            proportion = len(items) / total_items
+            target_for_stratum = max(1, round(target_samples * proportion))  # 至少抽取1个
+            
+            # 确保不超过该层级的总数
+            actual_sample_size = min(target_for_stratum, len(items))
+            
+            # 随机抽样
+            sampled_items = random.sample(items, actual_sample_size)
+            sampled_data.extend(sampled_items)
+            
+            allocation_info.append({
+                'stratum': key,
+                'total': len(items),
+                'target': target_for_stratum,
+                'actual': actual_sample_size,
+                'proportion': proportion
+            })
+        
+        # 如果抽样数量不足，从较大的层级补充
+        if len(sampled_data) < target_samples:
+            remaining_needed = target_samples - len(sampled_data)
+            print(f"\n需要补充 {remaining_needed} 个样本...")
+            
+            # 按层级大小排序，从大层级补充
+            large_strata = sorted(strata.items(), key=lambda x: len(x[1]), reverse=True)
+            
+            for key, items in large_strata:
+                if remaining_needed <= 0:
+                    break
+                
+                # 获取该层级已抽取的样本
+                already_sampled = [item for item in sampled_data 
+                                 if (item.get('source', 'Unknown') + '_' + 
+                                     item.get('question_type', 'Unknown')) == key]
+                
+                # 获取未抽取的样本
+                remaining_items = [item for item in items if item not in already_sampled]
+                
+                if remaining_items:
+                    additional_samples = min(remaining_needed, len(remaining_items))
+                    additional_items = random.sample(remaining_items, additional_samples)
+                    sampled_data.extend(additional_items)
+                    remaining_needed -= additional_samples
+                    
+                    # 更新分配信息
+                    for info in allocation_info:
+                        if info['stratum'] == key:
+                            info['actual'] += additional_samples
+                            break
+        
+        # 如果抽样数量过多，随机移除一些
+        if len(sampled_data) > target_samples:
+            sampled_data = random.sample(sampled_data, target_samples)
+        
+        print(f"\n分层抽样结果:")
+        print("=" * 80)
+        print(f"{'来源_题目类型':<30} {'原始数量':<8} {'目标数量':<8} {'实际数量':<8} {'抽样率':<8}")
+        print("-" * 80)
+        
+        # 重新统计最终抽样结果
+        final_counts = defaultdict(int)
+        for item in sampled_data:
+            source = item.get('source', 'Unknown')
+            question_type = item.get('question_type', 'Unknown')
+            key = f"{source}_{question_type}"
+            final_counts[key] += 1
+        
+        for info in allocation_info:
+            key = info['stratum']
+            final_actual = final_counts.get(key, 0)
+            sampling_rate = final_actual / info['total'] * 100
+            print(f"{key:<30} {info['total']:<8} {info['target']:<8} {final_actual:<8} {sampling_rate:>6.1f}%")
+        
+        print("-" * 80)
+        print(f"{'总计':<30} {total_items:<8} {target_samples:<8} {len(sampled_data):<8} {len(sampled_data)/total_items*100:>6.1f}%")
+        print("=" * 80)
+        
+        print(f"\n分层抽样完成！")
+        print(f"从 {len(full_dataset)} 个几何问题中抽取了 {len(sampled_data)} 个代表性问题")
+        
+        return sampled_data
+
+    def stratified_sample_dataset(self, dataset_path: str, target_samples: int = 100, 
+                                 random_seed: int = 42) -> List[Dict]:
+        """
+        分层抽样方法（兼容原有接口）
+        """
+        # 检查是否是OpenR1-Math格式
+        if 'OpenR1-Math' in dataset_path:
+            if os.path.isdir(dataset_path):
+                return self.stratified_sample_openr1_dataset(dataset_path, target_samples=target_samples, 
+                                                          random_seed=random_seed)
+            else:
+                # 解析路径格式
+                parts = dataset_path.split('|')
+                base_path = parts[0]
+                split = parts[1] if len(parts) > 1 else "default"
+                filter_geometry = parts[2].lower() == 'geometry' if len(parts) > 2 else True
+                return self.stratified_sample_openr1_dataset(base_path, split, filter_geometry,
+                                                          target_samples, random_seed)
+        
+        # 原有的MATH数据集分层抽样逻辑
         # 设置随机种子
         random.seed(random_seed)
         
@@ -399,8 +648,12 @@ class MathInterventionExperiment:
         results = {
             'problem': problem,
             'correct_answer': correct_answer,
-            'subject': problem_data.get('subject', 'Unknown'),
+            # 兼容不同数据集格式
+            'subject': problem_data.get('subject', problem_data.get('problem_type', 'Unknown')),
             'level': problem_data.get('level', 'Unknown'),
+            'problem_type': problem_data.get('problem_type', 'Unknown'),
+            'question_type': problem_data.get('question_type', 'Unknown'),
+            'source': problem_data.get('source', 'Unknown'),
             'experiments': {}
         }
         
@@ -428,7 +681,9 @@ class MathInterventionExperiment:
                     nothink_temperature=config.get('temperature', 0.7),
                     nothink_top_p=config.get('top_p', 0.8),
                     think_temperature=config.get('temperature', 0.6),
-                    think_top_p=config.get('top_p', 0.95)
+                    think_top_p=config.get('top_p', 0.95),
+                    think_do_sample=True,
+                    nothink_do_sample=True
                 )
                 
                 exp_result = {}
@@ -556,7 +811,9 @@ class MathInterventionExperiment:
                                   gpu_ids: List[int] = None,
                                   use_stratified_sampling: bool = False,
                                   target_samples: int = 100,
-                                  random_seed: int = 42) -> List[Dict]:
+                                  random_seed: int = 42,
+                                  openr1_split: str = "default",
+                                  filter_geometry: bool = True) -> List[Dict]:
         """运行分布式实验"""
         
         # 检测可用GPU
@@ -593,11 +850,24 @@ class MathInterventionExperiment:
         # 根据参数选择加载方式
         if use_stratified_sampling:
             print(f"使用分层抽样模式，目标样本数: {target_samples}")
-            dataset = temp_experiment.stratified_sample_dataset(
-                dataset_path, target_samples, random_seed
-            )
+            
+            # 检查是否是OpenR1-Math数据集
+            if 'OpenR1-Math' in dataset_path:
+                dataset = temp_experiment.stratified_sample_openr1_dataset(
+                    dataset_path, openr1_split, filter_geometry, target_samples, random_seed
+                )
+            else:
+                dataset = temp_experiment.stratified_sample_dataset(
+                    dataset_path, target_samples, random_seed
+                )
         else:
-            dataset = temp_experiment.load_math_dataset(dataset_path, max_samples)
+            # 检查是否是OpenR1-Math数据集
+            if 'OpenR1-Math' in dataset_path:
+                dataset = temp_experiment.load_openr1_math_dataset(
+                    dataset_path, openr1_split, filter_geometry, max_samples
+                )
+            else:
+                dataset = temp_experiment.load_math_dataset(dataset_path, max_samples)
         
         del temp_experiment  # 释放内存
         
@@ -616,7 +886,9 @@ class MathInterventionExperiment:
             'dataset_path': dataset_path,
             'use_stratified_sampling': use_stratified_sampling,
             'target_samples': target_samples,
-            'random_seed': random_seed
+            'random_seed': random_seed,
+            'openr1_split': openr1_split,
+            'filter_geometry': filter_geometry
         }
         
         # 使用ProcessPoolExecutor进行分布式处理
@@ -778,20 +1050,20 @@ def main():
         except RuntimeError:
             pass  # 如果已经设置过了就忽略
     
-    parser = argparse.ArgumentParser(description='MATH500数据集神经干预实验')
+    parser = argparse.ArgumentParser(description='MATH数据集神经干预实验')
     parser.add_argument('--model_path', type=str, 
                         default='/data4/huguangyi/models/Qwen/Qwen3-0.6B',
                         help='模型路径')
     parser.add_argument('--dataset_path', type=str,
-                        default='/data4/huguangyi/datasets/MATH500/test.jsonl',
-                        help='MATH数据集路径')
+                        default='/data4/huguangyi/datasets/OpenR1-Math',
+                        help='数据集路径（支持MATH或OpenR1-Math格式）')
     parser.add_argument('--max_samples', type=int, default=None,
                         help='最大样本数（用于测试）')
     parser.add_argument('--target_layer', type=int, default=14,
                         help='目标层')
-    parser.add_argument('--target_dimensions', type=str, default='18,8,28,1,13,656,3,896,686,840,569',
+    parser.add_argument('--target_dimensions', type=str, default='1, 2, 3, 5, 8, 9, 13, 16, 18, 28, 46, 61, 77, 81, 86, 92, 97, 103, 131, 139, 196, 230, 242, 306, 310, 402, 566, 569, 604, 654, 656, 663, 666, 671, 686, 700, 703, 810, 816, 826, 832, 840, 896',
                         help='目标维度，逗号分隔')
-    parser.add_argument('--output_dir', type=str, default='math_intervention_results_think_1epoch',
+    parser.add_argument('--output_dir', type=str, default='math_intervention_results_think_1epoch_43nodes_geometry',
                         help='输出目录')
     parser.add_argument('--device', type=str, default='cuda',
                         help='设备')
@@ -802,13 +1074,22 @@ def main():
     parser.add_argument('--num_gpus', type=int, default=None,
                         help='使用的GPU数量（从GPU 0开始）')
     
-    # 分层抽样相关参数d
+    # 分层抽样相关参数
     parser.add_argument('--use_stratified_sampling', action='store_true',
                         help='使用分层抽样模式，按level和subject进行分层抽样')
     parser.add_argument('--target_samples', type=int, default=100,
                         help='分层抽样的目标样本数量（默认100）')
     parser.add_argument('--random_seed', type=int, default=42,
                         help='分层抽样的随机种子（默认42）')
+    
+    # OpenR1-Math数据集相关参数
+    parser.add_argument('--openr1_split', type=str, default='default',
+                        choices=['default', 'extended', 'all'],
+                        help='OpenR1-Math数据集分割类型（default, extended, all）')
+    parser.add_argument('--filter_geometry', action='store_true', default=True,
+                        help='是否只筛选几何类型的问题（默认开启）')
+    parser.add_argument('--no_filter_geometry', dest='filter_geometry', action='store_false',
+                        help='关闭几何筛选，使用所有类型的数学问题')
     
     args = parser.parse_args()
     
@@ -835,7 +1116,14 @@ def main():
         }
     ]
     
-    print(f"开始MATH500神经干预实验（分布式模式）")
+    # 判断数据集类型并打印相应信息
+    if 'OpenR1-Math' in args.dataset_path:
+        print(f"开始OpenR1-Math神经干预实验（分布式模式）")
+        print(f"数据集分割: {args.openr1_split}")
+        print(f"几何筛选: {'开启' if args.filter_geometry else '关闭'}")
+    else:
+        print(f"开始MATH数据集神经干预实验（分布式模式）")
+    
     print(f"模型: {args.model_path}")
     print(f"数据集: {args.dataset_path}")
     
@@ -861,7 +1149,9 @@ def main():
         gpu_ids,
         args.use_stratified_sampling,
         args.target_samples,
-        args.random_seed
+        args.random_seed,
+        args.openr1_split,
+        args.filter_geometry
     )
     
     if args.use_stratified_sampling:

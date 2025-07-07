@@ -809,7 +809,7 @@ def parse_args():
                         help='设备')
     
     # GPU设备参数
-    parser.add_argument('--gpu_id', type=int, default=1,
+    parser.add_argument('--gpu_id', type=int, default=3,
                         help='指定使用的GPU设备ID（默认：4）')
     
     # 通用生成配置参数
@@ -859,9 +859,7 @@ def main():
     else:
         # 默认测试提示
         prompts = [
-            "Pat is to select six cookies from a tray containing only chocolate chip, oatmeal, and peanut butter cookies. There are at least six of each of these three kinds of cookies on the tray. How many different assortments of six cookies can be selected? (Note that cookies of the same type are not distinguishable.)",
-            "Pat is to select six cookies from a tray containing only chocolate chip, oatmeal, and peanut butter cookies. There are at least six of each of these three kinds of cookies on the tray. How many different assortments of six cookies can be selected? (Note that cookies of the same type are not distinguishable.)",
-            "Pat is to select six cookies from a tray containing only chocolate chip, oatmeal, and peanut butter cookies. There are at least six of each of these three kinds of cookies on the tray. How many different assortments of six cookies can be selected? (Note that cookies of the same type are not distinguishable.)"
+            "Convert the point $(0,3)$ in rectangular coordinates to polar coordinates.  Enter your answer in the form $(r,\\theta),$ where $r > 0$ and $0 \\le \\theta < 2 \\pi.$"
         ]
     
     print(f"将对模型 {args.model_path} 进行神经干预双模式实验")
