@@ -785,7 +785,7 @@ def parse_args():
                         help='目标层索引（可以是单个数字或用逗号分隔的多个数字，如"14"或"12,13,14"）')
     parser.add_argument('--target_dimensions', type=str, default='16',
                         help='目标维度，用逗号分隔')
-    parser.add_argument('--intervention_types', type=str, default='gaussian_replace',
+    parser.add_argument('--intervention_types', type=str, default='zero',
                         help='干预类型，用逗号分隔')
     parser.add_argument('--prompts_file', type=str, default=None,
                         help='包含测试提示的文件路径')
