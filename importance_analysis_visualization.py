@@ -1684,7 +1684,7 @@ def main():
                        help='输出目录路径')
     parser.add_argument('--layer', type=int, default=14,
                        help='指定分析的layer（默认分析所有layer）')
-    parser.add_argument('--top_k', type=int, default=20,
+    parser.add_argument('--top_k', type=int, default=100,
                        help='查找前k个最重要的元素（默认20）')
     parser.add_argument('--num_nodes', type=int, default=1024,
                        help='全连接网络的节点数（默认1024）')
@@ -1746,7 +1746,7 @@ def compute_degree_importance_only():
                        help='已保存矩阵的目录路径')
     parser.add_argument('--output_dir', type=str, default=None,
                        help='输出目录路径（默认使用matrices_dir）')
-    parser.add_argument('--top_k', type=int, default=20,
+    parser.add_argument('--top_k', type=int, default=100,
                        help='查找前k个最重要的节点（默认10）')
     parser.add_argument('--num_nodes', type=int, default=1024,
                        help='全连接网络的节点数（默认1024）')
@@ -1801,7 +1801,7 @@ def find_top_elements_only():
                        help='已保存矩阵的目录路径')
     parser.add_argument('--output_dir', type=str, default=None,
                        help='输出目录路径（默认使用matrices_dir）')
-    parser.add_argument('--top_k', type=int, default=10,
+    parser.add_argument('--top_k', type=int, default=100,
                        help='查找前k个最重要的元素（默认10）')
     parser.add_argument('--num_nodes', type=int, default=1024,
                        help='全连接网络的节点数（默认1024）')

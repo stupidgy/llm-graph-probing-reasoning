@@ -665,7 +665,7 @@ def generate_report(stats: Dict, subject_stats: Dict, subject_accuracy_stats: Di
 
 def main():
     """主函数"""
-    results_dir = "math_intervention_results_think_1epoch_43nodes_greedy"
+    results_dir = "math_intervention_results_think_1epoch_43nodes_geometry"
     
     if not os.path.exists(results_dir):
         print(f"错误：找不到结果目录 {results_dir}")

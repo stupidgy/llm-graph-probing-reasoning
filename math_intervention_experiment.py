@@ -40,7 +40,8 @@ class MathInterventionExperiment:
         self.results = []
     
     def load_openr1_math_dataset(self, dataset_dir: str, split: str = "default", 
-                                filter_geometry: bool = True, max_samples: int = None) -> List[Dict]:
+                                filter_geometry: bool = True, max_samples: int = None,
+                                single_file_index: int = None) -> List[Dict]:
         """
         加载OpenR1-Math数据集
         
@@ -49,6 +50,7 @@ class MathInterventionExperiment:
             split: 数据集分割类型 ("default", "extended", "all")
             filter_geometry: 是否只保留几何类型的问题
             max_samples: 最大样本数（用于测试）
+            single_file_index: 只加载指定索引的单个文件（0-9，None表示加载所有文件）
             
         Returns:
             加载的数据列表
@@ -56,6 +58,8 @@ class MathInterventionExperiment:
         print(f"正在加载OpenR1-Math数据集: {dataset_dir}")
         print(f"数据集分割: {split}")
         print(f"几何筛选: {filter_geometry}")
+        if single_file_index is not None:
+            print(f"单文件模式: 只加载索引 {single_file_index} 的文件")
         
         # 根据分割类型确定数据路径
         if split == "default":
@@ -74,7 +78,14 @@ class MathInterventionExperiment:
         if not parquet_files:
             raise ValueError(f"在 {data_path} 中没有找到parquet文件")
         
-        print(f"找到 {len(parquet_files)} 个parquet文件")
+        # 如果指定了单文件索引，只加载该文件
+        if single_file_index is not None:
+            if single_file_index < 0 or single_file_index >= len(parquet_files):
+                raise ValueError(f"单文件索引 {single_file_index} 超出范围 [0, {len(parquet_files)-1}]")
+            parquet_files = [parquet_files[single_file_index]]
+            print(f"单文件模式: 加载文件 {os.path.basename(parquet_files[0])}")
+        else:
+            print(f"找到 {len(parquet_files)} 个parquet文件")
         
         all_data = []
         geometry_count = 0
@@ -126,7 +137,8 @@ class MathInterventionExperiment:
         
         return all_data
     
-    def load_math_dataset(self, dataset_path: str, max_samples: int = None) -> List[Dict]:
+    def load_math_dataset(self, dataset_path: str, max_samples: int = None, 
+                         single_file_index: int = None) -> List[Dict]:
         """加载MATH数据集（保持向后兼容）"""
         print(f"正在加载数据集: {dataset_path}")
         
@@ -134,7 +146,8 @@ class MathInterventionExperiment:
         if 'OpenR1-Math' in dataset_path:
             # 如果是目录路径，使用新的加载方法
             if os.path.isdir(dataset_path):
-                return self.load_openr1_math_dataset(dataset_path, max_samples=max_samples)
+                return self.load_openr1_math_dataset(dataset_path, max_samples=max_samples, 
+                                                   single_file_index=single_file_index)
             # 如果指定了具体的分割和筛选选项，解析路径
             else:
                 # 假设路径格式为: /path/to/OpenR1-Math|split|geometry
@@ -142,7 +155,8 @@ class MathInterventionExperiment:
                 base_path = parts[0]
                 split = parts[1] if len(parts) > 1 else "default"
                 filter_geometry = parts[2].lower() == 'geometry' if len(parts) > 2 else True
-                return self.load_openr1_math_dataset(base_path, split, filter_geometry, max_samples)
+                return self.load_openr1_math_dataset(base_path, split, filter_geometry, max_samples,
+                                                   single_file_index)
         
         # 原始MATH数据集加载逻辑
         data = []
@@ -159,7 +173,7 @@ class MathInterventionExperiment:
     
     def stratified_sample_openr1_dataset(self, dataset_dir: str, split: str = "default",
                                        filter_geometry: bool = True, target_samples: int = 100, 
-                                       random_seed: int = 42) -> List[Dict]:
+                                       random_seed: int = 42, single_file_index: int = None) -> List[Dict]:
         """
         对OpenR1-Math数据集进行分层抽样
         
@@ -169,6 +183,7 @@ class MathInterventionExperiment:
             filter_geometry: 是否只保留几何类型的问题
             target_samples: 目标样本数量
             random_seed: 随机种子
+            single_file_index: 只加载指定索引的单个文件
             
         Returns:
             分层抽样后的数据集
@@ -179,7 +194,8 @@ class MathInterventionExperiment:
         print(f"正在对OpenR1-Math数据集进行分层抽样")
         
         # 加载全部数据
-        full_dataset = self.load_openr1_math_dataset(dataset_dir, split, filter_geometry)
+        full_dataset = self.load_openr1_math_dataset(dataset_dir, split, filter_geometry, 
+                                                   single_file_index=single_file_index)
         
         # 按source和question_type分组
         strata = defaultdict(list)
@@ -289,13 +305,14 @@ class MathInterventionExperiment:
         print(f"{'总计':<30} {total_items:<8} {target_samples:<8} {len(sampled_data):<8} {len(sampled_data)/total_items*100:>6.1f}%")
         print("=" * 80)
         
+        file_info = f"单文件 {single_file_index}" if single_file_index is not None else "所有文件"
         print(f"\n分层抽样完成！")
-        print(f"从 {len(full_dataset)} 个几何问题中抽取了 {len(sampled_data)} 个代表性问题")
+        print(f"从 {file_info} 的 {len(full_dataset)} 个几何问题中抽取了 {len(sampled_data)} 个代表性问题")
         
         return sampled_data
 
     def stratified_sample_dataset(self, dataset_path: str, target_samples: int = 100, 
-                                 random_seed: int = 42) -> List[Dict]:
+                                 random_seed: int = 42, single_file_index: int = None) -> List[Dict]:
         """
         分层抽样方法（兼容原有接口）
         """
@@ -303,7 +320,8 @@ class MathInterventionExperiment:
         if 'OpenR1-Math' in dataset_path:
             if os.path.isdir(dataset_path):
                 return self.stratified_sample_openr1_dataset(dataset_path, target_samples=target_samples, 
-                                                          random_seed=random_seed)
+                                                          random_seed=random_seed, 
+                                                          single_file_index=single_file_index)
             else:
                 # 解析路径格式
                 parts = dataset_path.split('|')
@@ -311,9 +329,9 @@ class MathInterventionExperiment:
                 split = parts[1] if len(parts) > 1 else "default"
                 filter_geometry = parts[2].lower() == 'geometry' if len(parts) > 2 else True
                 return self.stratified_sample_openr1_dataset(base_path, split, filter_geometry,
-                                                          target_samples, random_seed)
+                                                          target_samples, random_seed, single_file_index)
         
-        # 原有的MATH数据集分层抽样逻辑
+        # 原有的MATH数据集分层抽样逻辑（不支持单文件功能）
         # 设置随机种子
         random.seed(random_seed)
         
@@ -813,7 +831,8 @@ class MathInterventionExperiment:
                                   target_samples: int = 100,
                                   random_seed: int = 42,
                                   openr1_split: str = "default",
-                                  filter_geometry: bool = True) -> List[Dict]:
+                                  filter_geometry: bool = True,
+                                  single_file_index: int = None) -> List[Dict]:
         """运行分布式实验"""
         
         # 检测可用GPU
@@ -854,20 +873,21 @@ class MathInterventionExperiment:
             # 检查是否是OpenR1-Math数据集
             if 'OpenR1-Math' in dataset_path:
                 dataset = temp_experiment.stratified_sample_openr1_dataset(
-                    dataset_path, openr1_split, filter_geometry, target_samples, random_seed
+                    dataset_path, openr1_split, filter_geometry, target_samples, random_seed,
+                    single_file_index
                 )
             else:
                 dataset = temp_experiment.stratified_sample_dataset(
-                    dataset_path, target_samples, random_seed
+                    dataset_path, target_samples, random_seed, single_file_index
                 )
         else:
             # 检查是否是OpenR1-Math数据集
             if 'OpenR1-Math' in dataset_path:
                 dataset = temp_experiment.load_openr1_math_dataset(
-                    dataset_path, openr1_split, filter_geometry, max_samples
+                    dataset_path, openr1_split, filter_geometry, max_samples, single_file_index
                 )
             else:
-                dataset = temp_experiment.load_math_dataset(dataset_path, max_samples)
+                dataset = temp_experiment.load_math_dataset(dataset_path, max_samples, single_file_index)
         
         del temp_experiment  # 释放内存
         
@@ -888,7 +908,8 @@ class MathInterventionExperiment:
             'target_samples': target_samples,
             'random_seed': random_seed,
             'openr1_split': openr1_split,
-            'filter_geometry': filter_geometry
+            'filter_geometry': filter_geometry,
+            'single_file_index': single_file_index
         }
         
         # 使用ProcessPoolExecutor进行分布式处理
@@ -1067,7 +1088,7 @@ def main():
                         help='输出目录')
     parser.add_argument('--device', type=str, default='cuda',
                         help='设备')
-    parser.add_argument('--gpu_ids', type=str, default='0,1,2,6',
+    parser.add_argument('--gpu_ids', type=str, default='0,3,5,6,7',
                         help='使用的GPU ID列表，逗号分隔，例如"0,2,4"。如果不指定，使用所有可用GPU')
     parser.add_argument('--max_new_tokens', type=int, default=32768,
                         help='最大生成token数')
@@ -1090,6 +1111,10 @@ def main():
                         help='是否只筛选几何类型的问题（默认开启）')
     parser.add_argument('--no_filter_geometry', dest='filter_geometry', action='store_false',
                         help='关闭几何筛选，使用所有类型的数学问题')
+    
+    # 单文件模式参数
+    parser.add_argument('--single_file_index', type=int, default=0,
+                        help='只加载指定索引的单个parquet文件（0-9，None表示加载所有文件）。例如：0表示只加载train-00000-of-00010.parquet')
     
     args = parser.parse_args()
     
@@ -1121,6 +1146,8 @@ def main():
         print(f"开始OpenR1-Math神经干预实验（分布式模式）")
         print(f"数据集分割: {args.openr1_split}")
         print(f"几何筛选: {'开启' if args.filter_geometry else '关闭'}")
+        if args.single_file_index is not None:
+            print(f"单文件模式: 只加载文件索引 {args.single_file_index} (train-{args.single_file_index:05d}-of-00010.parquet)")
     else:
         print(f"开始MATH数据集神经干预实验（分布式模式）")
     
@@ -1151,7 +1178,8 @@ def main():
         args.target_samples,
         args.random_seed,
         args.openr1_split,
-        args.filter_geometry
+        args.filter_geometry,
+        args.single_file_index
     )
     
     if args.use_stratified_sampling:
