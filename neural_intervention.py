@@ -44,7 +44,8 @@ class NeuralInterventionController:
             model_name_or_path, 
             torch_dtype=torch.float16,
             trust_remote_code=True,
-            device_map=self.device
+            device_map=self.device,
+            attn_implementation="flash_attention_2"
         ).to(self.device)
         
         # 设置padding token
@@ -265,7 +266,16 @@ class NeuralInterventionController:
                   f"do_sample={generation_kwargs.get('do_sample')}")
             
             # 使用对应模式的模板
-            messages = [{"role": "user", "content": prompt}]
+            messages = [
+                {
+                    "role": "system", 
+                    "content": (
+                        "You are an expert mathematician. Solve the following math problem step by step. "
+                        "Provide the final answer wrapped in \\boxed{} and nothing else inside the box."
+                    )
+                },
+                {"role": "user", "content": prompt}
+            ]
             formatted_prompt = self.tokenizer.apply_chat_template(
                 messages, 
                 tokenize=False, 
@@ -282,83 +292,84 @@ class NeuralInterventionController:
             # 如果指定了目标层和维度，注册激活值钩子进行统计
             activation_stats = None
             if target_layer is not None and target_dimensions is not None:
-                # 为每个维度单独存储激活值
-                activation_values_by_dim = {dim: [] for dim in target_dimensions}
-                hook_call_count = 0  # 添加钩子调用计数
+                # 使用向量化的激活值收集
+                collected_activations = []  # 存储所有激活值 [num_tokens, num_dimensions]
                 
-                def stats_hook_fn(module, input, output):
-                    nonlocal hook_call_count
-                    hook_call_count += 1
+                def vectorized_stats_hook_fn(module, input, output):
+                    # 获取目标维度的激活值 - 向量化操作
+                    hidden_states = output[0]  # [batch_size, seq_len, hidden_dim]
+                    batch_size, seq_len, hidden_dim = hidden_states.shape
                     
-                    # 获取目标维度的激活值
-                    hidden_states = output[0]
-                    seq_len = hidden_states.shape[1]
+                    # 只对新生成的token进行统计（避免重复统计prompt部分）
+                    if seq_len == 1:
+                        # 单个新token的情况
+                        token_activations = hidden_states[:, 0, target_dimensions]  # [batch_size, num_target_dims]
+                    else:
+                        # 多个token的情况，只取最后一个
+                        token_activations = hidden_states[:, -1:, target_dimensions]  # [batch_size, 1, num_target_dims]
+                        token_activations = token_activations.squeeze(1)  # [batch_size, num_target_dims]
                     
-                    for dim_idx, dim in enumerate(target_dimensions):
-                        # 对于seq_len=1的情况，取第0个位置；对于seq_len>1的情况，取最后一个位置
-                        if seq_len == 1:
-                            token_activation = hidden_states[:, 0, dim]
-                        else:
-                            token_activation = hidden_states[:, -1, dim]  # 取最后一个位置
-                        
-                        activation_value = token_activation.flatten().detach().cpu().numpy()[0]
-                        activation_values_by_dim[dim].append(activation_value)
-                    
-                    total_collected = sum(len(values) for values in activation_values_by_dim.values())
+                    # 转换为CPU并存储 - 向量化操作
+                    activations_cpu = token_activations.detach().cpu().numpy()  # [batch_size, num_target_dims]
+                    collected_activations.append(activations_cpu)
                 
                 # 注册统计钩子
                 layer = self.model.model.layers[target_layer]
-                stats_hook = layer.register_forward_hook(stats_hook_fn)
-                print(f"  {mode_name}模式: 已注册激活值统计钩子在第{target_layer}层")
+                stats_hook = layer.register_forward_hook(vectorized_stats_hook_fn)
+                print(f"  {mode_name}模式: 已注册向量化激活值统计钩子在第{target_layer}层")
             
             with torch.no_grad():
                 original_outputs = self.model.generate(**inputs, **generation_kwargs)
             
-            # 计算激活值统计
+            # 计算激活值统计 - 向量化处理
             if target_layer is not None and target_dimensions is not None:
                 stats_hook.remove()
                 
-                # 详细的调试信息
+                # 调试信息
                 original_output_ids = original_outputs[0][len(inputs.input_ids[0]):].tolist()
-                original_text = self.tokenizer.decode(original_outputs[0], skip_special_tokens=True)
-                generated_text = self.tokenizer.decode(original_output_ids, skip_special_tokens=False)
                 
-                total_collected = sum(len(values) for values in activation_values_by_dim.values())
+                print(f"  {mode_name}模式向量化统计:")
+                print(f"    收集的批次数: {len(collected_activations)}")
+                print(f"    实际生成的token数量: {len(original_output_ids)}")
                 
-                print(f"  {mode_name}模式调试信息:")
-                print(f"    钩子总调用次数: {hook_call_count}")
-                print(f"    收集到的激活值总数: {total_collected}")
-                print(f"    目标维度数量: {len(target_dimensions)}")
-                print(f"    每个维度收集的token数: {len(list(activation_values_by_dim.values())[0]) if activation_values_by_dim else 0}")
-                print(f"    实际生成的token ID数量: {len(original_output_ids)}")
-                print(f"    生成的文本长度: {len(generated_text)}")
-                
-                # 为每个维度分别统计
-                for dim in target_dimensions:
-                    values = activation_values_by_dim[dim]
-                    if values:
-                        print(f"    维度 {dim} 统计: count={len(values)}, mean={np.mean(values):.6f}, std={np.std(values):.6f}")
-                
-                if activation_values_by_dim and any(values for values in activation_values_by_dim.values()):
+                if collected_activations:
+                    # 合并所有激活值 - 向量化操作
+                    all_activations = np.concatenate(collected_activations, axis=0)  # [total_tokens, num_target_dims]
+                    num_tokens, num_dims = all_activations.shape
+                    
+                    print(f"    合并后形状: {all_activations.shape}")
+                    print(f"    预期维度数: {len(target_dimensions)}")
+                    
+                    # 向量化统计计算
                     activation_stats = {
-                        'by_dimension': {
-                            dim: {
-                                'mean': float(np.mean(values)) if values else 0.0,
-                                'std': float(np.std(values)) if values else 0.0,
-                                'variance': float(np.var(values)) if values else 0.0,
-                                'min': float(np.min(values)) if values else 0.0,
-                                'max': float(np.max(values)) if values else 0.0,
-                                'count': len(values)
-                            }
-                            for dim, values in activation_values_by_dim.items()
-                        },
+                        'by_dimension': {},
                         'overall': {
-                            'total_collected': total_collected,
-                            'tokens_per_dimension': len(list(activation_values_by_dim.values())[0]) if activation_values_by_dim else 0,
-                            'actual_generated_tokens': len(original_output_ids)
+                            'total_collected': num_tokens * num_dims,
+                            'tokens_per_dimension': num_tokens,
+                            'actual_generated_tokens': len(original_output_ids),
+                            'collection_efficiency': len(collected_activations) / max(len(original_output_ids), 1)
                         }
                     }
-                    print(f"  {mode_name}模式激活值统计完成")
+                    
+                    # 为每个维度快速计算统计 - 向量化操作
+                    for i, dim in enumerate(target_dimensions):
+                        dim_values = all_activations[:, i]  # 获取第i个维度的所有值
+                        activation_stats['by_dimension'][dim] = {
+                            'mean': float(np.mean(dim_values)),
+                            'std': float(np.std(dim_values)),
+                            'variance': float(np.var(dim_values)),
+                            'min': float(np.min(dim_values)),
+                            'max': float(np.max(dim_values)),
+                            'count': len(dim_values)
+                        }
+                    
+                    # 打印快速统计摘要
+                    print(f"    统计完成，每个维度收集了 {num_tokens} 个值")
+                    for dim in target_dimensions[:3]:  # 只显示前3个维度的统计
+                        stats = activation_stats['by_dimension'][dim]
+                        print(f"    维度 {dim}: mean={stats['mean']:.4f}, std={stats['std']:.4f}")
+                    if len(target_dimensions) > 3:
+                        print(f"    ... 以及其他 {len(target_dimensions)-3} 个维度")
                 else:
                     print(f"  {mode_name}模式: 未收集到激活值")
                     activation_stats = None

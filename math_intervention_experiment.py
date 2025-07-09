@@ -453,24 +453,34 @@ class MathInterventionExperiment:
         return sampled_data
     
     def extract_answer_from_response(self, response_text: str) -> str:
-        """从模型输出中提取最终答案"""
+        """从模型输出中提取最终答案（答案一定被\boxed{}包裹）"""
         if not response_text or not response_text.strip():
             return ""
         
         text = response_text.strip()
         
-        # 匹配 \boxed{} 格式
-        boxed_match = re.search(r'\\boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}', text, re.DOTALL)
-        if boxed_match:
-            return boxed_match.group(1).strip()
+        # 手动解析 \boxed{} 格式，正确处理嵌套花括号
+        boxed_positions = []
+        for match in re.finditer(r'\\boxed\s*\{', text):
+            start_pos = match.end() - 1  # 指向开括号
+            brace_count = 0
+            content_start = start_pos + 1
+            
+            for i in range(start_pos, len(text)):
+                if text[i] == '{':
+                    brace_count += 1
+                elif text[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        content = text[content_start:i]
+                        boxed_positions.append((match.start(), content))
+                        break
         
-        # 匹配最终答案行
-        final_line = text.split('\n')[-1]
-        if re.match(r'^[A-D]$', final_line):  # 选择题
-            return final_line.strip()
-        if re.match(r'^[\d\.]+$', final_line):  # 数值题
-            return final_line.strip()
+        # 如果找到了 boxed，返回最后一个（最终答案）
+        if boxed_positions:
+            return boxed_positions[-1][1].strip()
         
+        # 如果没找到 boxed，返回空字符串
         return ""
     
     def normalize_math_expression(self, expr):
@@ -634,19 +644,72 @@ class MathInterventionExperiment:
             diff = sympy.simplify(expr_pred - expr_true)
             return diff == 0 or abs(float(diff.evalf())) < 1e-10
         except Exception as e:
-            # 最后尝试纯数值比较
+            # SymPy解析失败时，进行更严格的检查
+            # 只有在表达式非常简单且确实等价时才返回True
+            
+            # 检查是否都是纯数字
             try:
-                # 提取所有数字
-                pred_nums = re.findall(r'(\d+(?:\.\d+)?)', norm_pred)
-                true_nums = re.findall(r'(\d+(?:\.\d+)?)', norm_true)
-                
-                if pred_nums and true_nums:
-                    # 比较主要数值
-                    return float(pred_nums[0]) == float(true_nums[0])
+                float_pred = float(norm_pred)
+                float_true = float(norm_true)
+                return abs(float_pred - float_true) < 1e-10
             except:
                 pass
             
-            return False
+            # 检查是否都是简单的单项式（如 "2k" vs "2*k"）
+            # 移除空格和乘法符号进行比较
+            pred_simplified = re.sub(r'[\s\*]', '', norm_pred)
+            true_simplified = re.sub(r'[\s\*]', '', norm_true)
+            if pred_simplified == true_simplified:
+                return True
+            
+            # 如果表达式包含不同的变量或复杂结构，认为不等价
+            # 提取变量（字母）
+            pred_vars = set(re.findall(r'[a-zA-Z]', norm_pred))
+            true_vars = set(re.findall(r'[a-zA-Z]', norm_true))
+            
+            # 如果包含的变量不同，肯定不等价
+            if pred_vars != true_vars:
+                return False
+            
+            # 检查表达式结构：如果一个是加法表达式，另一个是单项，很可能不等价
+            # 通过检查是否包含加减号来判断
+            pred_has_ops = bool(re.search(r'[+\-]', norm_pred.replace(' ', '')))
+            true_has_ops = bool(re.search(r'[+\-]', norm_true.replace(' ', '')))
+            
+            # 如果一个有运算符一个没有，可能不等价（除非是简单的0项）
+            if pred_has_ops != true_has_ops:
+                # 检查是否包含明显的0项（如 "+ 0" 或 "- 0"）
+                has_zero_terms = ('0' in norm_pred and ('0' in norm_true or not true_has_ops)) or \
+                               ('0' in norm_true and ('0' in norm_pred or not pred_has_ops))
+                if not has_zero_terms:
+                    return False
+            
+            # 如果一个表达式包含多个项，另一个只有单项，很可能不等价
+            pred_terms = len(re.split(r'[+\-]', norm_pred.replace(' ', '')))
+            true_terms = len(re.split(r'[+\-]', norm_true.replace(' ', '')))
+            
+            if abs(pred_terms - true_terms) > 1:  # 项数差异过大
+                return False
+            
+            # 最后的数值提取比较（更严格）
+            try:
+                # 只有在表达式结构相似时才进行数值比较
+                pred_nums = re.findall(r'(\d+(?:\.\d+)?)', norm_pred)
+                true_nums = re.findall(r'(\d+(?:\.\d+)?)', norm_true)
+                
+                # 数字的数量和值都必须相同
+                if len(pred_nums) == len(true_nums) == 1:
+                    # 额外检查：确保表达式结构真的相似
+                    # 如果项数不同，即使只有一个数字也可能不等价
+                    if pred_terms != true_terms:
+                        return False
+                    return float(pred_nums[0]) == float(true_nums[0])
+                
+                # 如果数字数量不同，不等价
+                return False
+                
+            except:
+                return False
     
     def run_single_problem_experiment(self, problem_data: Dict, 
                                      intervention_configs: List[Dict]) -> Dict:
@@ -655,13 +718,8 @@ class MathInterventionExperiment:
         problem = problem_data['problem']
         correct_answer = problem_data['answer']
         
-        # 使用ChatML格式构建提示，适配Qwen模型
-        base_prompt = (
-            f"<|im_start|>system\n你是一个数学专家，请解决以下数学问题。"
-            f"答案必须使用 \\boxed{{}} 包裹。<|im_end|>\n"
-            f"<|im_start|>user\n{problem}<|im_end|>\n"
-            f"<|im_start|>assistant\n"
-        )
+        # 直接传递原始问题，让controller内部的apply_chat_template来处理格式化
+        # controller内部已经配置了正确的系统提示
         
         results = {
             'problem': problem,
@@ -689,9 +747,9 @@ class MathInterventionExperiment:
                     gaussian_std=config.get('gaussian_std', 1.0)
                 )
                 
-                # 运行双模式生成
+                # 运行双模式生成 - 直接传递原始问题
                 experiment_results = self.controller.generate_with_dual_mode_intervention(
-                    prompt=base_prompt,
+                    prompt=problem,  # 直接传递问题内容，不需要预格式化
                     max_new_tokens=config.get('max_new_tokens', 512),
                     target_layer=config.get('target_layer', config.get('layer', 14)),
                     target_dimensions=config.get('target_dimensions', config.get('dimensions', [16, 18])),
@@ -699,8 +757,8 @@ class MathInterventionExperiment:
                     nothink_top_p=config.get('top_p', 0.8),
                     think_temperature=config.get('temperature', 0.6),
                     think_top_p=config.get('top_p', 0.95),
-                    think_do_sample=True,
-                    nothink_do_sample=True
+                    think_do_sample=False,
+                    nothink_do_sample=False
                 )
                 
                 exp_result = {}
@@ -1081,13 +1139,13 @@ def main():
                         help='最大样本数（用于测试）')
     parser.add_argument('--target_layer', type=int, default=14,
                         help='目标层')
-    parser.add_argument('--target_dimensions', type=str, default='16',
+    parser.add_argument('--target_dimensions', type=str, default='18',
                         help='目标维度，逗号分隔')
-    parser.add_argument('--output_dir', type=str, default='math_intervention_results_nothink_1epoch_16',
+    parser.add_argument('--output_dir', type=str, default='math_intervention_results_think_1epoch_18_greedy',
                         help='输出目录')
     parser.add_argument('--device', type=str, default='cuda',
                         help='设备')
-    parser.add_argument('--gpu_ids', type=str, default='0,2,3,5,7',
+    parser.add_argument('--gpu_ids', type=str, default='0,2,3,4,5,7',
                         help='使用的GPU ID列表，逗号分隔，例如"0,2,4"。如果不指定，使用所有可用GPU')
     parser.add_argument('--max_new_tokens', type=int, default=32768,
                         help='最大生成token数')
