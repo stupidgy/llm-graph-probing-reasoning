@@ -122,47 +122,51 @@ class NeuralInterventionController:
             start_pos = 0
             end_pos = seq_len
             
-            for dim in dimensions:
-                if intervention_type == "gaussian_replace":
-                    # 用高斯随机分布完全替代指定维度
-                    shape = modified_states[:, start_pos:end_pos, dim].shape
-                    gaussian_values = torch.normal(
-                        mean=gaussian_mean, 
-                        std=gaussian_std, 
-                        size=shape, 
-                        device=modified_states.device,
-                        dtype=modified_states.dtype
-                    )
-                    modified_states[:, start_pos:end_pos, dim] = gaussian_values
+            # 向量化操作：一次处理所有指定维度
+            if intervention_type == "gaussian_replace":
+                # 用高斯随机分布完全替代指定维度
+                shape = (modified_states.shape[0], end_pos - start_pos, len(dimensions))
+                gaussian_values = torch.normal(
+                    mean=gaussian_mean, 
+                    std=gaussian_std, 
+                    size=shape, 
+                    device=modified_states.device,
+                    dtype=modified_states.dtype
+                )
+                modified_states[:, start_pos:end_pos, dimensions] = gaussian_values
                         
-                        
-                elif intervention_type == "gaussian_noise":
-                    # 在原有激活值基础上添加高斯噪声
-                    shape = modified_states[:, start_pos:end_pos, dim].shape
-                    noise = torch.normal(
-                        mean=gaussian_mean, 
-                        std=gaussian_std, 
-                        size=shape, 
-                        device=modified_states.device,
-                        dtype=modified_states.dtype
-                    )
-                    modified_states[:, start_pos:end_pos, dim] += noise
-                elif intervention_type == "zero":
-                    # 将指定维度置零
-                    modified_states[:, start_pos:end_pos, dim] = 0.0
-                elif intervention_type == "constant":
-                    # 将指定维度设为常数
-                    modified_states[:, start_pos:end_pos, dim] = intervention_value
-                elif intervention_type == "scale":
-                    # 缩放指定维度
-                    modified_states[:, start_pos:end_pos, dim] *= scale_factor
-                elif intervention_type == "noise":
-                    # 添加噪声（兼容旧版本）
-                    noise = torch.randn_like(modified_states[:, start_pos:end_pos, dim]) * intervention_value
-                    modified_states[:, start_pos:end_pos, dim] += noise
-                elif intervention_type == "invert":
-                    # 反转激活值
-                    modified_states[:, start_pos:end_pos, dim] = -modified_states[:, start_pos:end_pos, dim]
+            elif intervention_type == "gaussian_noise":
+                # 在原有激活值基础上添加高斯噪声
+                shape = (modified_states.shape[0], end_pos - start_pos, len(dimensions))
+                noise = torch.normal(
+                    mean=gaussian_mean, 
+                    std=gaussian_std, 
+                    size=shape, 
+                    device=modified_states.device,
+                    dtype=modified_states.dtype
+                )
+                modified_states[:, start_pos:end_pos, dimensions] += noise
+                
+            elif intervention_type == "zero":
+                # 将指定维度置零
+                modified_states[:, start_pos:end_pos, dimensions] = 0.0
+                
+            elif intervention_type == "constant":
+                # 将指定维度设为常数
+                modified_states[:, start_pos:end_pos, dimensions] = intervention_value
+                
+            elif intervention_type == "scale":
+                # 缩放指定维度
+                modified_states[:, start_pos:end_pos, dimensions] *= scale_factor
+                
+            elif intervention_type == "noise":
+                # 添加噪声（兼容旧版本）
+                noise = torch.randn_like(modified_states[:, start_pos:end_pos, dimensions]) * intervention_value
+                modified_states[:, start_pos:end_pos, dimensions] += noise
+                
+            elif intervention_type == "invert":
+                # 反转激活值
+                modified_states[:, start_pos:end_pos, dimensions] = -modified_states[:, start_pos:end_pos, dimensions]
             
             return modified_states
         

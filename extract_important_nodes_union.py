@@ -107,10 +107,10 @@ def extract_important_nodes_union(degree_file, elements_file, output_file=None):
 def main():
     parser = argparse.ArgumentParser(description="提取Think和NoThink模式下重要节点的并集")
     parser.add_argument('--degree_file', 
-                       default='importance_analysis_output/node_degree_importance_top_100.json',
+                       default='importance_analysis_output/node_degree_importance_top_10.json',
                        help='度重要性文件路径')
     parser.add_argument('--elements_file', 
-                       default='importance_analysis_output/top_100_important_elements.json',
+                       default='importance_analysis_output/top_10_important_elements.json',
                        help='重要元素文件路径')
     parser.add_argument('--output', 
                        default='importance_analysis_output/important_nodes_union.json',

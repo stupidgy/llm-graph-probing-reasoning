@@ -686,8 +686,7 @@ class MathInterventionExperiment:
                     intervention_type=config.get('intervention_type', 'gaussian_replace'),
                     scale_factor=config.get('scale_factor', 1.0),
                     gaussian_mean=config.get('gaussian_mean', 0.0),
-                    gaussian_std=config.get('gaussian_std', 1.0),
-                    intervene_on_prompt=False
+                    gaussian_std=config.get('gaussian_std', 1.0)
                 )
                 
                 # 运行双模式生成
@@ -1076,19 +1075,19 @@ def main():
                         default='/data4/huguangyi/models/Qwen/Qwen3-0.6B',
                         help='模型路径')
     parser.add_argument('--dataset_path', type=str,
-                        default='/data4/huguangyi/datasets/OpenR1-Math',
+                        default='/data4/huguangyi/datasets/MATH500/test.jsonl',
                         help='数据集路径（支持MATH或OpenR1-Math格式）')
     parser.add_argument('--max_samples', type=int, default=None,
                         help='最大样本数（用于测试）')
     parser.add_argument('--target_layer', type=int, default=14,
                         help='目标层')
-    parser.add_argument('--target_dimensions', type=str, default='1, 2, 3, 5, 8, 9, 13, 16, 18, 28, 46, 61, 77, 81, 86, 92, 97, 103, 131, 139, 196, 230, 242, 306, 310, 402, 566, 569, 604, 654, 656, 663, 666, 671, 686, 700, 703, 810, 816, 826, 832, 840, 896',
+    parser.add_argument('--target_dimensions', type=str, default='16',
                         help='目标维度，逗号分隔')
-    parser.add_argument('--output_dir', type=str, default='math_intervention_results_think_1epoch_43nodes_geometry',
+    parser.add_argument('--output_dir', type=str, default='math_intervention_results_nothink_1epoch_16',
                         help='输出目录')
     parser.add_argument('--device', type=str, default='cuda',
                         help='设备')
-    parser.add_argument('--gpu_ids', type=str, default='0,3,5,6,7',
+    parser.add_argument('--gpu_ids', type=str, default='0,2,3,5,7',
                         help='使用的GPU ID列表，逗号分隔，例如"0,2,4"。如果不指定，使用所有可用GPU')
     parser.add_argument('--max_new_tokens', type=int, default=32768,
                         help='最大生成token数')
@@ -1129,14 +1128,12 @@ def main():
     
     # 定义实验配置
     intervention_configs = [
-        # 高斯替换干预
+        # 置零干预
         {
             'intervention': True,
             'target_layer': args.target_layer,
             'target_dimensions': target_dimensions,
-            'intervention_type': 'gaussian_replace',
-            'gaussian_mean': 0,
-            'gaussian_std': 0,
+            'intervention_type': 'zero',
             'max_new_tokens': args.max_new_tokens
         }
     ]
